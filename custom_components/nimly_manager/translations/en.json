@@ -1,0 +1,22 @@
+{
+  "title": "Nimly Manager",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect a Nimly lock",
+        "description": "Enter the lock's Zigbee2MQTT topic. The integration uses Home Assistant's existing MQTT connection.",
+        "data": {
+          "base_topic": "Zigbee2MQTT base topic",
+          "device_name": "Zigbee2MQTT device name"
+        }
+      }
+    },
+    "error": {
+      "invalid_topic": "Both topic fields are required",
+      "wildcard_not_allowed": "MQTT wildcards are not allowed"
+    },
+    "abort": {
+      "already_configured": "This MQTT device is already configured"
+    }
+  }
+}

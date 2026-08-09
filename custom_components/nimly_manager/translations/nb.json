@@ -1,0 +1,22 @@
+{
+  "title": "Nimly Manager",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Koble til en Nimly-lås",
+        "description": "Oppgi Zigbee2MQTT-topic for låsen. Integrasjonen bruker Home Assistants eksisterende MQTT-tilkobling.",
+        "data": {
+          "base_topic": "Zigbee2MQTT base-topic",
+          "device_name": "Zigbee2MQTT-enhetsnavn"
+        }
+      }
+    },
+    "error": {
+      "invalid_topic": "Begge topic-feltene må fylles ut",
+      "wildcard_not_allowed": "MQTT-wildcards er ikke tillatt"
+    },
+    "abort": {
+      "already_configured": "Denne MQTT-enheten er allerede konfigurert"
+    }
+  }
+}

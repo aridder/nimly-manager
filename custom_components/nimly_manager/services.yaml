@@ -1,0 +1,60 @@
+start_fingerprint_enrollment:
+  name: Start lokal fingeravtrykksregistrering
+  description: Opprett en tidsbegrenset veiviser for én person og fingerprint-slot.
+  fields:
+    config_entry_id:
+      name: Lås
+      required: true
+      selector:
+        config_entry:
+          integration: nimly_manager
+    person_id:
+      name: Person-ID
+      required: true
+      selector:
+        text:
+    person_name:
+      name: Navn
+      required: true
+      selector:
+        text:
+    slot:
+      name: Fingerprint-slot
+      required: true
+      selector:
+        number:
+          min: 3
+          max: 199
+          mode: box
+
+confirm_fingerprint_enrollment:
+  name: Bekreft lokal programmering
+  description: Bekreft at låsens lokale programmeringssekvens er fullført.
+  fields:
+    config_entry_id:
+      name: Lås
+      required: true
+      selector:
+        config_entry:
+          integration: nimly_manager
+    session_id:
+      name: Session-ID
+      required: true
+      selector:
+        text:
+
+cancel_fingerprint_enrollment:
+  name: Avbryt fingeravtrykksregistrering
+  description: Avbryt den eksakte, aktive enrollment-sessionen.
+  fields:
+    config_entry_id:
+      name: Lås
+      required: true
+      selector:
+        config_entry:
+          integration: nimly_manager
+    session_id:
+      name: Session-ID
+      required: true
+      selector:
+        text:
