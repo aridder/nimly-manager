@@ -18,6 +18,13 @@ if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
     from homeassistant.helpers.typing import ConfigType
 
+try:
+    from homeassistant.helpers import config_validation as cv
+except ModuleNotFoundError:  # Home Assistant is not installed in pure domain tests.
+    CONFIG_SCHEMA = None
+else:
+    CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
+
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Set up the integration and register its actions."""

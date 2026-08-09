@@ -40,7 +40,7 @@ def test_hacs_metadata_and_brand_asset_exist() -> None:
 
     assert hacs["name"] == "Nimly Manager"
     assert hacs["country"] == "NO"
-    assert (ROOT / "brand" / "icon.png").stat().st_size > 0
+    assert (COMPONENT / "brand" / "icon.png").stat().st_size > 0
 
 
 def test_release_versions_match() -> None:

@@ -1,6 +1,6 @@
 # Nimly Manager
 
-![Nimly Manager](brand/icon.png)
+![Nimly Manager](custom_components/nimly_manager/brand/icon.png)
 
 Nimly Manager skal gi Home Assistant et bedre administrasjonslag for
 Nimly-låser. Zigbee2MQTT er fortsatt transportlaget for den ordinære
