@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from homeassistant.helpers import config_validation as cv
+
 from .const import (
     CONF_BASE_TOPIC,
     CONF_DEVICE_NAME,
@@ -18,12 +20,7 @@ if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
     from homeassistant.helpers.typing import ConfigType
 
-try:
-    from homeassistant.helpers import config_validation as cv
-except ModuleNotFoundError:  # Home Assistant is not installed in pure domain tests.
-    CONFIG_SCHEMA = None
-else:
-    CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
