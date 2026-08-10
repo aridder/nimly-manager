@@ -11,6 +11,7 @@ from .fingerprint_enrollment import (
     FingerprintEnrollment,
     FingerprintEnrollmentError,
 )
+from .slots import FingerprintSlotRegistry
 
 LOCKED = "locked"
 UNLOCKED = "unlocked"
@@ -37,10 +38,17 @@ class FingerprintVerification:
 class NimlyLockRuntime:
     """Track only the state needed to verify an enrollment safely."""
 
-    def __init__(self, *, topic: str) -> None:
+    def __init__(
+        self,
+        *,
+        topic: str,
+        slots: FingerprintSlotRegistry | None = None,
+    ) -> None:
         self.topic = topic
         self.lock_state: str | None = None
+        self.last_mqtt_at: datetime | None = None
         self.enrollment: FingerprintEnrollment | None = None
+        self.slots = slots or FingerprintSlotRegistry()
 
     def start_enrollment(
         self,
@@ -58,6 +66,10 @@ class NimlyLockRuntime:
                 raise FingerprintEnrollmentError(
                     "låsen har allerede en aktiv fingerprint-enrollment"
                 )
+        if self.slots.is_occupied(slot):
+            raise FingerprintEnrollmentError(
+                f"fingerprint-slot {slot:03d} er allerede bekreftet opptatt"
+            )
         self.enrollment = FingerprintEnrollment.start(
             person_id=person_id,
             person_name=person_name,
@@ -90,6 +102,7 @@ class NimlyLockRuntime:
         """Observe a Z2M state without retaining its credential-bearing payload."""
 
         current_state = _lock_state(payload)
+        self.last_mqtt_at = now
         if current_state is None:
             return None
 
@@ -98,16 +111,27 @@ class NimlyLockRuntime:
         if previous_state != LOCKED or current_state != UNLOCKED:
             return None
 
-        session = self.enrollment
-        if session is None:
-            return None
-
         source = _text(payload.get("last_unlock_source"))
         user_slot = _slot(payload.get("last_unlock_user"))
         if source is None or user_slot is None:
             return None
+        if source.lower() in {"fingerprint", "fingerprintsensor"}:
+            try:
+                self.slots.observe(slot=user_slot, now=now)
+            except ValueError:
+                return None
+
+        session = self.enrollment
+        if session is None:
+            return None
         if not session.observe_unlock(source=source, user_slot=user_slot, now=now):
             return None
+        self.slots.verify(
+            slot=user_slot,
+            person_id=session.person_id,
+            person_name=session.person_name,
+            now=now,
+        )
         return FingerprintVerification(
             session=session,
             source=source.lower(),
@@ -124,7 +148,31 @@ class NimlyLockRuntime:
         return {
             "state_topic": self.topic,
             "lock_state": self.lock_state,
+            "last_mqtt_at": (
+                self.last_mqtt_at.isoformat() if self.last_mqtt_at is not None else None
+            ),
             "fingerprint_enrollment": enrollment,
+            "fingerprint_slot_counts": self.slots.diagnostics(),
+        }
+
+    def public_state(self, *, now: datetime) -> dict[str, object]:
+        """Return admin-visible state for the Nimly Manager panel."""
+
+        enrollment: dict[str, object] | None = None
+        instructions: list[str] = []
+        if self.enrollment is not None:
+            self.enrollment.refresh(now=now)
+            enrollment = self.enrollment.as_public_dict()
+            instructions = list(self.enrollment.instructions)
+        return {
+            "state_topic": self.topic,
+            "lock_state": self.lock_state,
+            "last_mqtt_at": (
+                self.last_mqtt_at.isoformat() if self.last_mqtt_at is not None else None
+            ),
+            "enrollment": enrollment,
+            "instructions": instructions,
+            "slots": self.slots.as_list(),
         }
 
     def _session(self, session_id: str) -> FingerprintEnrollment:

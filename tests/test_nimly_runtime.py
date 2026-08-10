@@ -66,6 +66,10 @@ def test_locked_to_unlocked_matching_fingerprint_verifies() -> None:
     assert "8472" not in repr(result.as_event_data())
     assert runtime.enrollment is not None
     assert runtime.enrollment.state is EnrollmentState.VERIFIED
+    slot = runtime.slots.get(42)
+    assert slot is not None
+    assert slot.status == "verified"
+    assert slot.person_name == "Asbjørn"
 
 
 def test_repeated_unlocked_payload_does_not_verify() -> None:
@@ -143,7 +147,42 @@ def test_diagnostics_never_retain_raw_payload_or_pin() -> None:
     assert set(diagnostics) == {
         "state_topic",
         "lock_state",
+        "last_mqtt_at",
         "fingerprint_enrollment",
+        "fingerprint_slot_counts",
     }
     assert "8472" not in repr(diagnostics)
     assert "battery" not in repr(diagnostics)
+
+
+def test_fingerprint_unlock_is_observed_without_active_enrollment() -> None:
+    runtime = NimlyLockRuntime(topic="zigbee2mqtt/Dør")
+    runtime.observe_mqtt_state({"state": "LOCK"}, now=NOW)
+
+    result = runtime.observe_mqtt_state(
+        {
+            "state": "UNLOCK",
+            "last_unlock_source": "fingerprintsensor",
+            "last_unlock_user": 77,
+        },
+        now=NOW + timedelta(seconds=1),
+    )
+
+    assert result is None
+    slot = runtime.slots.get(77)
+    assert slot is not None
+    assert slot.status == "observed"
+    assert slot.person_name is None
+
+
+def test_known_slot_cannot_be_selected_for_enrollment() -> None:
+    runtime = NimlyLockRuntime(topic="zigbee2mqtt/Dør")
+    runtime.slots.observe(slot=42, now=NOW)
+
+    with pytest.raises(FingerprintEnrollmentError, match="bekreftet opptatt"):
+        runtime.start_enrollment(
+            person_id="person-asbjorn",
+            person_name="Asbjørn",
+            slot=42,
+            now=NOW + timedelta(seconds=1),
+        )

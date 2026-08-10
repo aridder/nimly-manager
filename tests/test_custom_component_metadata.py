@@ -5,12 +5,18 @@ ROOT = Path(__file__).parents[1]
 COMPONENT = ROOT / "custom_components" / "nimly_manager"
 
 
-def test_manifest_declares_mqtt_dependency_and_config_flow() -> None:
+def test_manifest_declares_panel_dependencies_and_config_flow() -> None:
     manifest = json.loads((COMPONENT / "manifest.json").read_text())
 
     assert manifest["domain"] == "nimly_manager"
     assert manifest["config_flow"] is True
-    assert "mqtt" in manifest["dependencies"]
+    assert set(manifest["dependencies"]) >= {
+        "frontend",
+        "http",
+        "mqtt",
+        "panel_custom",
+        "websocket_api",
+    }
     assert manifest["iot_class"] == "local_push"
     assert manifest["documentation"].startswith("https://github.com/")
     assert manifest["issue_tracker"].endswith("/issues")
@@ -49,3 +55,14 @@ def test_release_versions_match() -> None:
 
     assert f'version = "{manifest["version"]}"' in pyproject
     assert f"## {manifest['version']}" in (ROOT / "CHANGELOG.md").read_text()
+
+
+def test_admin_panel_asset_contains_enrollment_flow() -> None:
+    panel = COMPONENT / "frontend" / "nimly-manager-panel.js"
+    source = panel.read_text()
+
+    assert panel.stat().st_size > 0
+    assert 'customElements.define("nimly-manager-panel"' in source
+    assert '"nimly_manager/enrollment/start"' in source
+    assert '"nimly_manager/enrollment/confirm"' in source
+    assert '"nimly_manager/enrollment/cancel"' in source

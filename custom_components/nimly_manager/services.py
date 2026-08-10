@@ -69,7 +69,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
             )
         except FingerprintEnrollmentError as err:
             raise ServiceValidationError(str(err)) from err
-        _fire_state(hass, call.data[ATTR_CONFIG_ENTRY_ID], session)
+        async_fire_enrollment_state(hass, call.data[ATTR_CONFIG_ENTRY_ID], session)
         return service_response(session) if call.return_response else None
 
     async def confirm(call: ServiceCall) -> ServiceResponse | None:
@@ -81,7 +81,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
             )
         except FingerprintEnrollmentError as err:
             raise ServiceValidationError(str(err)) from err
-        _fire_state(hass, call.data[ATTR_CONFIG_ENTRY_ID], session)
+        async_fire_enrollment_state(hass, call.data[ATTR_CONFIG_ENTRY_ID], session)
         return service_response(session) if call.return_response else None
 
     async def cancel(call: ServiceCall) -> ServiceResponse | None:
@@ -93,7 +93,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
             )
         except FingerprintEnrollmentError as err:
             raise ServiceValidationError(str(err)) from err
-        _fire_state(hass, call.data[ATTR_CONFIG_ENTRY_ID], session)
+        async_fire_enrollment_state(hass, call.data[ATTR_CONFIG_ENTRY_ID], session)
         return service_response(session) if call.return_response else None
 
     hass.services.async_register(
@@ -130,7 +130,7 @@ def _runtime(hass: HomeAssistant, call: ServiceCall) -> NimlyLockRuntime:
     return runtime
 
 
-def _fire_state(
+def async_fire_enrollment_state(
     hass: HomeAssistant,
     entry_id: str,
     session: FingerprintEnrollment,
