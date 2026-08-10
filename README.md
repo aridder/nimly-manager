@@ -28,8 +28,9 @@ og panelside tas i bruk. Tøm eventuelt nettleserens hurtigbuffer hvis en gammel
 panelside fortsatt vises.
 
 Oppgi Zigbee2MQTTs base-topic, normalt `zigbee2mqtt`, og låsens eksakte
-friendly name. MQTT-integrasjonen må allerede være konfigurert i Home
-Assistant.
+friendly name. Et komplett topic som `zigbee2mqtt/ytterdor` godtas også uten at
+base-topicet legges til to ganger. MQTT-integrasjonen må allerede være
+konfigurert i Home Assistant.
 
 ## Manuell installasjon
 

@@ -30,6 +30,10 @@ EVENT_FINGERPRINT_ENROLLMENT_VERIFIED = "nimly_fingerprint_enrollment_verified"
 
 
 def state_topic(base_topic: str, device_name: str) -> str:
-    """Build the Zigbee2MQTT state topic without accepting wildcards."""
+    """Build the state topic from a friendly name or an already-prefixed topic."""
 
-    return f"{base_topic.strip().strip('/')}/{device_name.strip().strip('/')}"
+    base_topic = base_topic.strip().strip("/")
+    device_name = device_name.strip().strip("/")
+    if device_name == base_topic or device_name.startswith(f"{base_topic}/"):
+        return device_name
+    return f"{base_topic}/{device_name}"

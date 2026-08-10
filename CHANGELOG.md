@@ -1,5 +1,9 @@
 # Endringslogg
 
+## 0.2.1
+
+- Unngå dobbelt Zigbee2MQTT-prefiks når device name allerede er et komplett topic.
+
 ## 0.2.0
 
 - Egen, mobilvennlig Nimly Manager-side i Home Assistant-sidepanelet.
