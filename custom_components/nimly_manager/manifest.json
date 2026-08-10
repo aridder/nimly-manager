@@ -3,10 +3,10 @@
   "name": "Nimly Manager",
   "codeowners": ["@aridder"],
   "config_flow": true,
-  "dependencies": ["mqtt"],
+  "dependencies": ["frontend", "http", "mqtt", "panel_custom", "websocket_api"],
   "documentation": "https://github.com/aridder/nimly-manager#readme",
   "integration_type": "hub",
   "iot_class": "local_push",
   "issue_tracker": "https://github.com/aridder/nimly-manager/issues",
-  "version": "0.1.0"
+  "version": "0.2.0"
 }

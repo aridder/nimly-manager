@@ -8,6 +8,12 @@ DEFAULT_BASE_TOPIC = "zigbee2mqtt"
 
 DATA_RUNTIMES = "runtimes"
 DATA_SERVICES_REGISTERED = "services_registered"
+DATA_SLOT_STORAGE = "slot_storage"
+DATA_WEBSOCKET_REGISTERED = "websocket_registered"
+
+PANEL_URL_PATH = "nimly-manager"
+PANEL_STATIC_URL = "/nimly_manager_static"
+PANEL_WEB_COMPONENT = "nimly-manager-panel"
 
 SERVICE_START_FINGERPRINT_ENROLLMENT = "start_fingerprint_enrollment"
 SERVICE_CONFIRM_FINGERPRINT_ENROLLMENT = "confirm_fingerprint_enrollment"
