@@ -308,7 +308,7 @@ ikke proben. Proben er fortsatt bare lese-verktøy for seed og firmware.
 
 ### Steg 2: verktøyet er klart (2026-10-20)
 
-Pakken `src/nimly_ble/` implementerer link-krypto, ramming, session og
+Pakken `nimly_ble` (nå i `custom_components/nimly_manager/nimly_ble/`, se steg 5) implementerer link-krypto, ramming, session og
 eier-flytene, transport-uavhengig (bleak nå, HA `bluetooth` senere). Alle
 implementasjonsvalg er sjekket mot onesti-lock sitt Python-bibliotek (ingen
 avvik), og krypto/ramming er verifisert mot onesti sine uavhengige vektorer
@@ -323,7 +323,7 @@ Sikkerhetsegenskaper som er testet:
 - Eiernøkkelen skrives write-ahead (fsync, 0600) til
   `~/.config/nimly-manager/owner-<adresse>.json` i samme øyeblikk
   `UserAuthUpdate` svarer, **før** neste kommando. Fila er låsens nøkkel: ikke
-  i repo, ikke i scratch, ikke del den. Flyttes til HA `Store` i steg 5.
+  i repo, ikke i scratch, ikke del den. Importeres til HA `Store` i steg 5.
 - `UserAuthBegin` mot en u-enrollet lås bruker all-null device-id, ikke den
   annonserte identifikatoren.
 - `fingerprint-scan` godtar bare BLE-slot 150–199 og mapper ikke til Zigbee.
@@ -394,8 +394,65 @@ offset; kan være «neste ledige Zigbee-slot». Ingen automatisk mapping før et
 andre datapunkt (BLE 151) er observert. Dermed er hele hybriden bevist
 ende-til-ende: HA starter over BLE, fingeren registreres, Zigbee verifiserer.
 
-Gjenstår (steg 5, egen økt): HA-action i nimly-manager som sender
-`FingerprintScan` via HAs `bluetooth`-integrasjon (krever ESPHome-proxy ved
-døra; Mac-en ved døra fikk −73 dBm, HA-verten −98), eiernøkkel flyttet fra
-`~/.config/nimly-manager/` til HA `Store`, og UI som sier «legg fingeren på
-NÅ» i stedet for å vente på svar. Verifisering via dagens Zigbee-flyt, uendret.
+Steg 5 (under) implementerer HA-siden av dette; selve maskinvaretesten via
+proxyen gjenstår.
+
+### Steg 5: FingerprintScan fra Home Assistant (kode klar 2026-10-20)
+
+Versjon 0.3.0 av integrasjonen. Ikke kjørt mot låsen ennå — proxyen ved døra
+(eget repo `esphome`) må på plass først, og hver skriving mot låsen skjer bare
+etter Asbjørns bekreftelse.
+
+**Hva som er bygget**
+
+| Del | Hvor | Hva |
+|---|---|---|
+| Bibliotek i komponenten | `custom_components/nimly_manager/nimly_ble/` | `nimly_ble` flyttet inn så HACS leverer det. `uv`/CLI ser det fortsatt som toppnivåpakken `nimly_ble` (hatch `sources`-mapping). |
+| HA-transport | `ble_transport.py` | Samme `Transport`-grensesnitt som `transport_bleak.py`, over `bluetooth.async_ble_device_from_address` + `bleak-retry-connector`. Proxyen brukes transparent. |
+| Eiernøkkel | `owner_store.py` + options-flow | Engangsimport: lim inn innholdet i `owner-<adresse>.json` under *Konfigurer* på integrasjonen. Lagres i `.storage/nimly_manager.owner_keys` (`Store(private=True)`, 0600). Aldri i `entry.options`, logg eller diagnostics (`OwnerRecord` har `repr=False` på nøkkelfeltene). Slettes **ikke** når config-entryen fjernes; bare bevisst via options-flowen. |
+| BLE-adresse | options-flow | `lock_address` i eierposten er en macOS CoreBluetooth-UUID, ikke en MAC. HA trenger MAC-en; options-flowen lister tilkoblbare annonseringer med `0xFD00`-service-data (navn, RSSI, kilde, seed-tilstand) og godtar manuell MAC. |
+| Action | `nimly_manager.start_fingerprint_scan` | `person_name`, `ble_slot` 150–199, `at_the_lock: true` (påkrevd). Returnerer med én gang; tilstand via eventet `nimly_fingerprint_scan_state` og panelet. `cancel_fingerprint_scan` avbryter lokalt. |
+| Gater | `nimly_ble/enrollment.py::scan_fingerprint` | Nekter uten enrollet eierpost, firmware < 4.7.90, `DeviceModelGet` ≠ kjent fingeravtrykk-modell. Tidsavbrudd: 90 s for hele forsøket, 30 s per svar (låsen brukte 8,5 s). |
+| UI | panelet | Steg 1 «Kobler til låsen — gjør deg klar», steg 2 stor «LEGG FINGEREN PÅ NÅ» idet kommandoen skrives (callback rett før `FingerprintScan`), steg 3 «lås, og lås opp med den NYE fingeren». 1 s polling + event-abonnement mens skann pågår. |
+| Verifisering | `runtime.py` | `fingerprint_enrollment.py` er uendret. Etter `ok` fra låsen er skannet *armert*: første `LOCKED → UNLOCKED` med fingeravtrykk-kilde fra en Zigbee-slot registeret **ikke kjente fra før**, oppretter en vanlig `FingerprintEnrollment` for den sloten og kjører den uendrede verifiseringen (samme event `nimly_fingerprint_enrollment_verified`, nå med `ble_slot`). Avbrutt, feilet eller utløpt skann armerer aldri. |
+| Datapunkt | `slots.py` | BLE-slot lagres på den verifiserte slot-posten (`ble_slot`). Rene data; ingen kode utleder Zigbee-slot fra BLE-slot. Brukte BLE-slots sperres i velgeren. |
+
+**Hvorfor «første ukjente fingeravtrykk-opplåsing»:** Zigbee-sloten er
+ukjent når skannet sendes (150 → 11 var ikke forutsigbart), så dagens
+eksakt-slot-regel kan ikke brukes direkte uten å endre
+`fingerprint_enrollment.py`. Regelen er derfor lagt i runtime-laget, og
+begrenset: bare etter `ok`, bare `LOCKED → UNLOCKED`, bare fingeravtrykk-
+kilde, bare en slot registeret ikke hadde sett. Bruker en annen person en
+*kjent* finger først, skjer ingenting; bruker noen en finger registeret ikke
+kjente (f.eks. sluttbrukerens egen, aldri observert over Zigbee), blir den
+feilattribuert. Derfor sier UI-en «lås opp med den NYE fingeren, før noen
+andre bruker låsen».
+
+**Testprotokoll (Asbjørn, ved døra, med proxyen oppe)**
+
+1. HA → *Innstillinger → Enheter og tjenester → Nimly Manager → Konfigurer*:
+   velg låsens MAC fra listen (skal vise `enrollet` og proxyen som kilde,
+   rundt −73 dBm), lim inn innholdet i `owner-*.json`. Lagre. Entryen lastes
+   på nytt.
+2. Sidepanelet *Nimly Manager* → kortet «Registrer finger fra Home Assistant»
+   skal si at låsen er synlig via proxyen. Hvis ikke: ikke start.
+3. Velg navn, **BLE-slot 160** (ikke 151 — se under), kryss av «Jeg står ved
+   låsen». Start. Finger klar over sensoren under «Kobler til».
+4. Ved «LEGG FINGEREN PÅ NÅ»: finger på, følg pipene, hold til kortet
+   skifter (ca. 8–10 s).
+5. Lås, og lås opp med den nye fingeren, før noen andre bruker låsen.
+   Kortet skal vise «BEKREFTET VIA ZIGBEE» med `BLE 160 → Zigbee N`.
+6. Skriv datapunktet inn under. Hvis skannet feiler: prøv én gang til;
+   feil to ganger → stopp og noter `error`-teksten fra kortet.
+
+**Hvorfor 160 og ikke 151:** med 150 → 11 vil både «fast offset (−139)» og
+«neste ledige Zigbee-slot» forutsi 151 → 12. Et nabo-slot skiller altså ikke
+hypotesene. 160 gjør det: fast offset gir 21, neste-ledige gir 12 (eller det
+neste låsen har ledig). Først da vet vi om en mapping i det hele tatt er
+mulig å regne ut.
+
+**Datapunkt nr. 2:** _ikke observert ennå._ Fyll inn: `BLE ___ → Zigbee ___`
+(dato, firmware, hvilken slot som var ledig i Z2M-visningen før skannet).
+
+Fortsatt ikke implementert, bevisst: `FingerprintClear` (destruktiv; slot-
+semantikken må være bevist av datapunkt 2 først), RFID, master-PIN.

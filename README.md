@@ -51,6 +51,10 @@ Manager** i Home Assistants sidepanel for administratorer.
 - velge en ukjent slot og navn på personen
 - følge programmeringssekvensen ved den fysiske låsen
 - bekrefte programmeringen og verifisere med en ekte opplåsing
+- (eksperimentelt) starte skanningen fra Home Assistant over Bluetooth i
+  stedet for masterfinger-sekvensen: importer eiernøkkelen under
+  **Konfigurer**, velg BLE-slot 150–199, stå ved låsen, og legg fingeren på
+  når panelet sier **NÅ**. Zigbee verifiserer som før.
 
 Slotoversikten bruker tre bevisnivåer:
 
@@ -109,10 +113,13 @@ uv run --extra ble nimly-ble-probe inspect <probe-id>
 `inspect` gjør bare GATT-lesing. Verktøyet har ingen kommandoer for å låse opp,
 endre PIN/RFID, starte fingerprint-enrollment eller slette data.
 
-Skriving til låsen bor i et eget verktøy, `nimly-ble-owner` (pakken
-`src/nimly_ble/`), med `preflight`, `enroll` og `fingerprint-scan`. Det er
-forsknings- og engangsverktøy for en laptop ved døra, ikke
-produksjonstransporten; se [fingerprint-enrollment.md](docs/fingerprint-enrollment.md).
+Skriving til låsen bor i pakken `nimly_ble`
+(`custom_components/nimly_manager/nimly_ble/`, levert med integrasjonen).
+CLI-en `nimly-ble-owner` bruker den fra en laptop ved døra for `preflight`,
+`enroll` (engangs eier-enrollment) og `fingerprint-scan`. Integrasjonen bruker
+samme pakke over Home Assistants Bluetooth-integrasjon, så en ESPHome
+`bluetooth_proxy` ved døra kan være transporten; se
+[fingerprint-enrollment.md](docs/fingerprint-enrollment.md).
 
 På macOS må Codex/terminalprosessen ha Bluetooth-tilgang. Låsen kan også måtte
 vekkes fysisk før den annonserer.
