@@ -245,7 +245,7 @@ class NimlyManagerPanel extends HTMLElement {
             return this._slotButton(slot, known.get(slot), enrollment);
           }).join("")}
         </div>
-        ${!active ? this._startForm(known) : `<p class="active-note">Fullfør eller avbryt aktiv registrering før du velger en ny slot.</p>`}
+        ${!active && !scanActive ? this._startForm(known) : `<p class="active-note">Fullfør eller avbryt aktiv registrering før du velger en ny slot.</p>`}
       </section>
     `;
   }

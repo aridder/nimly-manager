@@ -430,6 +430,10 @@ andre bruker låsen».
 
 **Testprotokoll (Asbjørn, ved døra, med proxyen oppe)**
 
+0. Åpne sidepanelet og sjekk at slot **011** står som *observert* (fingeren
+   fra BLE 150). Gjør den ikke det: lås, og lås opp én gang med den fingeren
+   **før** noe skann startes. Regelen «første ukjente fingeravtrykk-
+   opplåsing» beskytter bare mot fingre registeret allerede kjenner.
 1. HA → *Innstillinger → Enheter og tjenester → Nimly Manager → Konfigurer*:
    velg låsens MAC fra listen (skal vise `enrollet` og proxyen som kilde,
    rundt −73 dBm), lim inn innholdet i `owner-*.json`. Lagre. Entryen lastes
@@ -444,6 +448,14 @@ andre bruker låsen».
    Kortet skal vise «BEKREFTET VIA ZIGBEE» med `BLE 160 → Zigbee N`.
 6. Skriv datapunktet inn under. Hvis skannet feiler: prøv én gang til;
    feil to ganger → stopp og noter `error`-teksten fra kortet.
+
+Avvik fra den beviste Mac-kjøringen, første mistenkte hvis fingeren ikke
+blir lagret: Mac-CLI-en holdt BLE-forbindelsen ~30 s etter `ok` (ventet på
+`UserAdded`-event); HA kobler fra rett etter svaret. Låsen svarer først etter
+at skanningen er ferdig, så det bør være trygt, men det er ikke bevist.
+
+Eiernøkkelen ligger i `.storage/nimly_manager.owner_keys` og blir med i
+HA-sikkerhetskopier. Behandle sikkerhetskopien deretter.
 
 **Hvorfor 160 og ikke 151:** med 150 → 11 vil både «fast offset (−139)» og
 «neste ledige Zigbee-slot» forutsi 151 → 12. Et nabo-slot skiller altså ikke
