@@ -135,7 +135,9 @@ async def fingerprint_scan(
     await session.owner_authenticate(
         record.owner_key, user_id=0, device_id=record.device_id
     )
+    sent_at = time.monotonic()
     response = await session.send(CommandId.FINGERPRINT_SCAN, payload)
+    response_seconds = round(time.monotonic() - sent_at, 1)
     reported_slot, lock_status = protocol.parse_fingerprint_scan(response.payload)
     status_name = {
         0: "ok", 1: "error", 2: "unknown_command", 3: "crc_error",
@@ -155,5 +157,6 @@ async def fingerprint_scan(
         "requested_slot": slot,
         "reported_slot": reported_slot,
         "scan_status": status_name,
+        "response_seconds": response_seconds,
         "user_added_events": events,
     }
