@@ -61,6 +61,39 @@ class NimlyAdvertisement:
             return "seed_and_device_token"
         return "unknown"
 
+    @property
+    def enrollment_state(self) -> str:
+        """Report factory-fresh vs enrolled BLE state from the seed, honestly.
+
+        The onesti-lock BLE protocol notes read the 0xFD00 service data as
+        ``[seed: 2B][identifier: 6B]``: an all-zero seed means a lock that has
+        never been enrolled over BLE (the default owner key still opens it),
+        any other seed means an enrolled lock whose identifier is a SHA-1
+        prefix. This read decides whether local owner enrollment needs a
+        physical factory reset, so it must never guess.
+
+        The only advertisement anyone has observed carried 10 bytes, not the
+        documented 8, and the two extra bytes may sit before, inside or after
+        the identifier. When the length is not exactly 8 we therefore evaluate
+        both plausible seed offsets and refuse to decide if they disagree.
+        """
+
+        data = self.service_data
+        if data is None:
+            return "unknown"
+        if len(data) == 8:
+            return "factory" if data[0:2] == b"\x00\x00" else "enrolled"
+        if len(data) == 10:
+            # Try the seed at the two offsets a 10-byte layout allows.
+            front_zero = data[0:2] == b"\x00\x00"
+            shifted_zero = data[2:4] == b"\x00\x00"
+            if front_zero == shifted_zero:
+                return "factory" if front_zero else "enrolled"
+            # One offset looks factory-fresh and the other does not; the
+            # layout is undecided, so do not claim either state.
+            return "ambiguous"
+        return "unknown"
+
     def as_dict(self, *, reveal_identifiers: bool = False) -> dict[str, object]:
         result: dict[str, object] = {
             "probe_id": self.probe_id,
@@ -68,6 +101,7 @@ class NimlyAdvertisement:
             "rssi": self.rssi,
             "matched_by": list(self.matched_by),
             "service_data_kind": self.service_data_kind,
+            "enrollment_state": self.enrollment_state,
             "service_data_length": (
                 len(self.service_data) if self.service_data is not None else None
             ),

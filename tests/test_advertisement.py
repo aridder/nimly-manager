@@ -86,3 +86,60 @@ def test_observed_connect_module_service_data_is_classified_without_exposure() -
 
     assert result.service_data_kind == "connect_module_token_observed"
     assert "service_data_hex" not in result.as_dict()
+
+
+def test_zero_seed_eight_byte_data_reads_as_factory_fresh() -> None:
+    result = inspect_advertisement(
+        address="device-4",
+        name=None,
+        service_uuids=[],
+        service_data={"fd00": bytes.fromhex("0000010203040506")},
+    )
+    assert result is not None
+    assert result.enrollment_state == "factory"
+    assert result.as_dict()["enrollment_state"] == "factory"
+
+
+def test_nonzero_seed_eight_byte_data_reads_as_enrolled() -> None:
+    result = inspect_advertisement(
+        address="device-5",
+        name=None,
+        service_uuids=[],
+        service_data={"fd00": bytes.fromhex("0102030405060708")},
+    )
+    assert result is not None
+    assert result.enrollment_state == "enrolled"
+
+
+def test_ten_byte_data_is_ambiguous_when_seed_offsets_disagree() -> None:
+    # Factory-looking at offset 0, enrolled-looking at offset 2: undecided.
+    result = inspect_advertisement(
+        address="device-6",
+        name="Dør",
+        service_uuids=[],
+        service_data={"fd00": bytes.fromhex("00000102030405060708")},
+    )
+    assert result is not None
+    assert result.enrollment_state == "ambiguous"
+
+
+def test_ten_byte_data_agrees_as_enrolled_when_no_offset_is_zero() -> None:
+    result = inspect_advertisement(
+        address="device-7",
+        name="Dør",
+        service_uuids=[],
+        service_data={"fd00": bytes(range(1, 11))},
+    )
+    assert result is not None
+    assert result.enrollment_state == "enrolled"
+
+
+def test_absent_service_data_has_unknown_enrollment_state() -> None:
+    result = inspect_advertisement(
+        address="device-8",
+        name="Nimly",
+        service_uuids=[NIMLY_SERVICE_UUID],
+        service_data={},
+    )
+    assert result is not None
+    assert result.enrollment_state == "unknown"

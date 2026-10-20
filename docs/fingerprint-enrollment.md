@@ -1,6 +1,6 @@
 # Fingeravtrykk-enrollment: beslutning og sikker testplan
 
-Sist verifisert: 2026-08-09.
+Sist verifisert: 2026-10-20.
 
 ## Produktbeslutning
 
@@ -63,8 +63,22 @@ Offisiell visuell kilde:
 
 ## Valgfri fremtidsresearch: fjernstart over BLE
 
-Følgende må bevises før `0x57` eventuelt kan implementeres som en separat,
-eksperimentell funksjon:
+Siden august har [onesti-lock](https://github.com/fredrik-lindseth/onesti-lock)
+(oppdatert 2026-10-18) dekodet hele BLE-eier-flyten statisk fra den offisielle
+appen, og lagt ved et Python-BLE-bibliotek under
+`custom_components/onesti_lock/ble/` — **ikke koblet inn og aldri kjørt mot en
+lås**. Det betyr at en HCI-capture ikke lenger er nødvendig for å *oppdage*
+protokollen; den er nå bare *validering* av en allerede dokumentert flyt. Vi
+gjengir ikke protokollen her — se onesti-lock sine notater for mekanikken:
+
+- nøkkelutveksling, pakkeformat og AES-128-CBC-laget:
+  [`ble-protocol.md`](https://github.com/fredrik-lindseth/onesti-lock/blob/main/docs/nimly-ble-app/ble-protocol.md)
+- lokal eier-enrollment uten sky (ECDH-avledet eiernøkkel, standardnøkkel på
+  fabrikkresatt lås):
+  [`ble-auth-provisioning.md`](https://github.com/fredrik-lindseth/onesti-lock/blob/main/docs/nimly-ble-app/ble-auth-provisioning.md)
+
+Følgende må bevises mot *vår* lås før `0x57` eventuelt kan implementeres som en
+separat, eksperimentell funksjon:
 
 1. Låsen annonserer den dokumenterte BLE-tjenesten og standard firmwarefelt kan
    leses.
@@ -154,3 +168,65 @@ protokollreferansen beskriver `BlobStart`, `BlobStream` og `BlobComplete`, men
 ikke fragmentenes wire-format. Vi skal ikke gjette dette eller sende tilfeldige
 fragmenter til låsen. Capturen må vise fragmentering, command reference og
 responseflyt før proben implementerer ECDH-linktesten.
+
+## Fysisk observasjon 2026-10-20: ny Connect Module
+
+En nyere Connect Module er montert. To tekniske hindringer fra august er borte:
+
+- **Kontinuerlig annonsering.** HAs Bluetooth-adapter ser nå en enhet «Nimly»
+  som sender ut tjenesten `0xFD00` i vanlig drift, ikke bare under appens
+  discovery-flyt. Det stemmer med onesti-lock sin lesning av at en *enrolled*
+  modul annonserer hele tiden.
+- **Firmware 4.8.03.** Over den dokumenterte 4.7.90-grensen for `DeviceModelGet`
+  og admin-kommandoene, inkludert `FingerprintScan` (`0x57`). `firmware.py`
+  rapporterer nå `fingerprint_scan_command_documented: true` for denne
+  versjonen, men holder `fingerprint_enrollment: "unverified"` — at kommandoen
+  er dokumentert er ikke det samme som at enrollment er bevist mot maskinvare.
+
+To ting gjenstår før HA kan sende kommandoer:
+
+1. **Signalstyrke.** HA mottar på ~−100 dBm, helt i grensen. Å sende kommandoer
+   trygt krever en Bluetooth-proxy nær døra (ESP32 med ESPHome,
+   `bluetooth_proxy` med `active: true`).
+2. **Eierinnlogging.** Ingen har kjørt onesti-lock sin eier-auth mot en fysisk
+   lås ennå. Vår første test vil være den aller første maskinvaretesten av den
+   flyten. Ingen proprietær write sendes før seed-lesningen under er avklart.
+
+### Beslutningstre: trenger vi factory reset?
+
+Dette erstatter den gamle «HCI-capture først»-planen. Den avgjørende lesningen
+er de to første bytene (seed) i `0xFD00`-service-dataen, slik onesti-lock leser
+den (`[seed: 2B][identifier: 6B]`). `advertisement.py` rapporterer nå
+`enrollment_state` fra denne seeden, og nekter å gjette når den observerte
+10-byte-varianten gir tvetydig seed-offset (`ambiguous`).
+
+| `enrollment_state` | Betydning | Vei videre |
+|---|---|---|
+| `factory` (seed `00 00`) | Aldri enrolled over BLE; standard eiernøkkel åpner ennå | Lokal eier-enrollment virker **uten** reset. Zigbee urørt. Laveste risiko. |
+| `enrolled` (seed ≠ `00 00`) **og** låsen finnes i brukerens egen Nimly BLE-app | Enrolled gjennom app + sky | HA kan autentisere som med-eier **uten** reset: eiernøkkel og device-id hentes fra brukerens egen sky-konto ved reconnect (`LockCredentialDto` / `Credentials`-endepunktet i onesti-notatene). Brukeren gjør engangs-innlogging selv; ingenting logges. |
+| `enrolled` men **ikke** i noen app | Enrolled, men nøkkelen er utilgjengelig | Modul-reset (knapp, ~15 s — dropper Zigbee-paringen) → ny Zigbee-paring → deretter som `factory`. |
+| `ambiguous` / `unknown` | 10-byte-layout ikke avklart, eller ingen service-data lest | Ikke beslutt. Skaff en rå advertisement-capture (se under) og avklar byteordenen før noe sendes. |
+
+Faren ved reset: modul-reset dropper Zigbee-paringen, og hele dagens
+nimly-manager-integrasjon går over Zigbee2MQTT. `factory`- og med-eier-veiene
+unngår dette helt.
+
+### Arkitekturnotat: proben er ikke produksjonstransporten
+
+`nimly-ble-probe` er macOS/CoreBluetooth-forskningsverktøy for å lese seed og
+firmware fra en maskin nær døra. Produksjons-BLE i integrasjonen må gå gjennom
+Home Assistants egen `bluetooth`-integrasjon, slik at ESPHome-proxyen faktisk
+kan brukes som transport. Proben og integrasjonen deler protokollforståelse,
+men ikke BLE-stack.
+
+### To ting bare brukeren kan gjøre
+
+1. **Les seeden.** Enten:
+   - gi appen som kjører terminalen Bluetooth-tilgang (System Settings →
+     Personvern og sikkerhet → Bluetooth), og kjør
+     `uv run --extra ble nimly-ble-probe scan --reveal-identifiers` fra et sted
+     nær døra; macOS-proben avbryter (exit 134) uten denne tilgangen, eller
+   - hent rå advertisement-bytes fra HAs Bluetooth-integrasjon sin diagnostikk
+     (ingen proxy nødvendig for seed-sjekken).
+2. **Bekreft app-status.** Ble den nye modulen noen gang lagt til i den
+   offisielle Nimly BLE-appen? Det avgjør `enrolled`-raden over.
