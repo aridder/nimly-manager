@@ -18,5 +18,22 @@
     "abort": {
       "already_configured": "Denne MQTT-enheten er allerede konfigurert"
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Bluetooth og eiernøkkel",
+        "description": "Velg låsens BLE-adresse slik Home Assistant (eller proxyen) ser den. Eiernøkkel: {owner_key_state}. For å importere, lim inn hele innholdet i owner-<adresse>.json fra ~/.config/nimly-manager/ på maskinen som gjorde enrollment. Nøkkelen lagres kun i Home Assistants private lager, vises aldri igjen og tas ikke med i diagnostikk.",
+        "data": {
+          "ble_address": "BLE-adresse (MAC)",
+          "owner_record": "Eierpost (innholdet i owner-*.json)",
+          "remove_owner_key": "Slett lagret eiernøkkel (tapt nøkkel krever modulreset og ny Zigbee-paring)"
+        }
+      }
+    },
+    "error": {
+      "invalid_ble_address": "Oppgi en BLE-adresse på formen AA:BB:CC:DD:EE:FF",
+      "invalid_owner_record": "Eierposten er ikke en komplett, enrollet owner-*.json"
+    }
   }
 }

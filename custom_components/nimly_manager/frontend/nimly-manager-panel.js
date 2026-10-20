@@ -1,6 +1,10 @@
 const SLOT_MIN = 3;
 const SLOT_MAX = 199;
 const ACTIVE_STATES = new Set(["local_programming", "awaiting_verification"]);
+const BLE_SLOT_MIN = 150;
+const BLE_SLOT_MAX = 199;
+const ACTIVE_SCAN_STATES = new Set(["connecting", "scanning", "awaiting_verification"]);
+const SCAN_STATE_EVENT = "nimly_fingerprint_scan_state";
 
 class NimlyManagerPanel extends HTMLElement {
   constructor() {
@@ -15,6 +19,11 @@ class NimlyManagerPanel extends HTMLElement {
     this._working = false;
     this._error = "";
     this._pollTimer = null;
+    this._scanPollTimer = null;
+    this._unsubscribeScan = null;
+    this._bleSlot = null;
+    this._bleName = "";
+    this._atTheLock = false;
   }
 
   set hass(value) {
@@ -22,17 +31,39 @@ class NimlyManagerPanel extends HTMLElement {
     if (this.isConnected && !this._data && !this._loading) {
       this._load();
     }
+    if (this.isConnected && !this._unsubscribeScan) this._subscribeScan();
   }
 
   connectedCallback() {
     this._render();
     if (this._hass) this._load();
     this._pollTimer = window.setInterval(() => this._load(true), 3000);
+    // A scan moves in seconds (connect → finger on NOW → answer); poll fast too.
+    this._scanPollTimer = window.setInterval(() => {
+      if (this._entry?.scan && ACTIVE_SCAN_STATES.has(this._entry.scan.state)) this._load(true);
+    }, 1000);
+    this._subscribeScan();
   }
 
   disconnectedCallback() {
     window.clearInterval(this._pollTimer);
+    window.clearInterval(this._scanPollTimer);
     this._pollTimer = null;
+    this._scanPollTimer = null;
+    if (this._unsubscribeScan) {
+      this._unsubscribeScan.then((unsub) => unsub()).catch(() => {});
+      this._unsubscribeScan = null;
+    }
+  }
+
+  _subscribeScan() {
+    if (!this._hass?.connection || this._unsubscribeScan) return;
+    this._unsubscribeScan = this._hass.connection
+      .subscribeEvents(() => this._load(true), SCAN_STATE_EVENT)
+      .catch(() => {
+        this._unsubscribeScan = null;
+        return () => {};
+      });
   }
 
   async _load(quiet = false) {
@@ -114,6 +145,36 @@ class NimlyManagerPanel extends HTMLElement {
     });
   }
 
+  _startScan() {
+    const personName = this._bleName.trim();
+    if (!personName) {
+      this._error = "Skriv inn navnet til personen.";
+      this._render();
+      return;
+    }
+    if (this._bleSlot === null) {
+      this._error = "Velg en BLE-slot (150–199).";
+      this._render();
+      return;
+    }
+    if (!this._atTheLock) {
+      this._error = "Bekreft at du står ved låsen. Fingeren må på sensoren i samme sekund som kommandoen sendes.";
+      this._render();
+      return;
+    }
+    this._action("nimly_manager/fingerprint_scan/start", {
+      person_name: personName,
+      ble_slot: this._bleSlot,
+      at_the_lock: true,
+    });
+  }
+
+  _cancelScan(sessionId) {
+    this._action("nimly_manager/fingerprint_scan/cancel", {
+      session_id: sessionId,
+    });
+  }
+
   _render() {
     if (!this.shadowRoot) return;
     const entry = this._entry;
@@ -156,9 +217,14 @@ class NimlyManagerPanel extends HTMLElement {
     const occupiedCount = entry.slots.length;
     const unknownCount = SLOT_MAX - SLOT_MIN + 1 - occupiedCount;
 
+    const scan = entry.scan;
+    const scanActive = scan && ACTIVE_SCAN_STATES.has(scan.state);
+
     return `
       ${this._deviceCard(entry)}
-      ${active || enrollment?.state === "verified" ? this._workflow(entry) : ""}
+      ${scan && (scanActive || scan.state === "verified" || scan.state === "failed") ? this._scanCard(entry) : ""}
+      ${active || (enrollment?.state === "verified" && !scan?.enrollment_session_id) ? this._workflow(entry) : ""}
+      ${entry.ble?.owner_key_imported && !scanActive && !active ? this._scanForm(entry) : ""}
       <section class="card slots-card">
         <div class="section-heading">
           <div>
@@ -236,6 +302,81 @@ class NimlyManagerPanel extends HTMLElement {
           ${local ? `<button class="primary" id="confirm" ${this._working ? "disabled" : ""}>Jeg har programmert låsen</button>` : ""}
           <button class="secondary danger" id="cancel" ${this._working ? "disabled" : ""}>Avbryt</button>
         </div>
+      </section>`;
+  }
+
+  _scanCard(entry) {
+    const scan = entry.scan;
+    const state = scan.state;
+    const heading = `${this._escape(scan.person_name)} · BLE-slot ${scan.ble_slot}`;
+    if (state === "verified") {
+      return `
+        <section class="card success-card">
+          <div class="success-icon">✓</div>
+          <div>
+            <p class="eyebrow">BEKREFTET VIA ZIGBEE</p>
+            <h2>${this._escape(scan.person_name)} er registrert</h2>
+            <p>BLE-slot <strong>${scan.ble_slot}</strong> rapporteres av Zigbee som slot <strong>${String(scan.zigbee_slot).padStart(3, "0")}</strong>.</p>
+            <p class="datapoint">Datapunkt: BLE ${scan.ble_slot} → Zigbee ${scan.zigbee_slot}. Skriv det inn i docs/fingerprint-enrollment.md.</p>
+          </div>
+        </section>`;
+    }
+    if (state === "failed" || state === "cancelled" || state === "expired") {
+      return `
+        <section class="card">
+          <p class="eyebrow">BLE-SKANNING ${state === "failed" ? "FEILET" : state === "cancelled" ? "AVBRUTT" : "UTLØPT"}</p>
+          <h2>${heading}</h2>
+          <p>${this._escape(scan.error || "Ingen finger ble registrert fra Home Assistant.")}</p>
+          <p class="privacy">Låsen kan ha fullført en skanning som allerede var startet. Den verifiseres ikke automatisk nå; start en ny skanning når du er klar.</p>
+        </section>`;
+    }
+    const connecting = state === "connecting";
+    const scanning = state === "scanning";
+    return `
+      <section class="card workflow-card ${scanning ? "scanning-now" : ""}">
+        <div class="section-heading">
+          <div><p class="eyebrow">BLE-SKANNING</p><h2>${heading}</h2></div>
+          <span class="expires">Utløper ${this._relativeTime(scan.expires_at)}</span>
+        </div>
+        <ol class="stepper three">
+          <li class="${connecting ? "current" : "done"}"><span>1</span><div><strong>Kobler til låsen</strong><small>Via Bluetooth-proxy. Gjør deg klar.</small></div></li>
+          <li class="${scanning ? "current" : connecting ? "" : "done"}"><span>2</span><div><strong>Finger på sensoren</strong><small>I samme sekund som kommandoen sendes.</small></div></li>
+          <li class="${state === "awaiting_verification" ? "current" : ""}"><span>3</span><div><strong>Verifiser</strong><small>Lås, og lås opp med den nye fingeren.</small></div></li>
+        </ol>
+        ${connecting ? `<div class="verification-box"><div class="pulse-ring"><span>⌁</span></div><div><h3>Gjør deg klar</h3><p>Home Assistant kobler til låsen og logger inn som eier. Hold fingeren rett over sensoren.</p><small>Neste melding kommer uten forvarsel.</small></div></div>` : ""}
+        ${scanning ? `<div class="finger-now" role="alert"><div class="finger-now-icon">☝</div><h3>LEGG FINGEREN PÅ NÅ</h3><p>Kommandoen er sendt. Hold fingeren rolig på sensoren til låsen svarer (ca. 8–10 sekunder). Følg låsens pip.</p></div>` : ""}
+        ${state === "awaiting_verification" ? `<div class="verification-box"><div class="pulse-ring"><span>◎</span></div><div><h3>Låsen bekreftet skanningen${scan.response_seconds ? ` etter ${scan.response_seconds} s` : ""}</h3><p>${entry.lock_state === "locked" ? "Låsen er låst. Lås den nå opp med den NYE fingeren, før noen andre bruker låsen." : "Lås låsen, og lås den deretter opp med den NYE fingeren, før noen andre bruker låsen."}</p><small>Zigbee-sloten er ukjent til låsen rapporterer den. Første fingeravtrykk-opplåsing fra en ukjent slot regnes som denne fingeren.</small></div></div>` : ""}
+        <div class="workflow-actions">
+          <button class="secondary danger" id="cancel-scan" ${this._working ? "disabled" : ""}>Avbryt</button>
+          <small class="cancel-note">Avbryt stopper Home Assistant. En skanning låsen allerede har startet, kan den fullføre selv.</small>
+        </div>
+      </section>`;
+  }
+
+  _scanForm(entry) {
+    const used = new Set(entry.used_ble_slots || []);
+    const ble = entry.ble || {};
+    const reach = ble.visible
+      ? `Låsen er synlig for Home Assistant${ble.rssi != null ? ` på ${ble.rssi} dBm` : ""}${ble.source ? ` via ${this._escape(ble.source)}` : ""}.`
+      : "Home Assistant ser ikke låsen nå. Sjekk Bluetooth-proxyen ved døra før du starter.";
+    const options = Array.from({ length: BLE_SLOT_MAX - BLE_SLOT_MIN + 1 }, (_, index) => {
+      const slot = index + BLE_SLOT_MIN;
+      const taken = used.has(slot);
+      return `<option value="${slot}" ${taken ? "disabled" : ""} ${this._bleSlot === slot ? "selected" : ""}>${slot}${taken ? " · brukt" : ""}</option>`;
+    }).join("");
+    return `
+      <section class="card">
+        <div class="section-heading">
+          <div><p class="eyebrow">EKSPERIMENTELT · BLUETOOTH</p><h2>Registrer finger fra Home Assistant</h2></div>
+        </div>
+        <p class="explanation">${reach} Eiernøkkel: importert${ble.owner_name ? ` (${this._escape(ble.owner_name)})` : ""}.</p>
+        <p class="explanation">Låsen svarer først når skanningen er ferdig. Stå ved låsen med fingeren klar; panelet sier fra i samme sekund som kommandoen sendes.</p>
+        <label for="ble-name">Navn</label>
+        <input id="ble-name" maxlength="100" autocomplete="name" placeholder="For eksempel Madeleine" value="${this._escape(this._bleName)}">
+        <label for="ble-slot">BLE-slot (150–199, ikke Zigbee-slot)</label>
+        <select id="ble-slot" aria-label="BLE-slot"><option value="" ${this._bleSlot === null ? "selected" : ""}>Velg BLE-slot</option>${options}</select>
+        <label class="check"><input type="checkbox" id="at-the-lock" ${this._atTheLock ? "checked" : ""}> Jeg står ved låsen nå og er klar med fingeren</label>
+        <button class="primary wide" id="start-scan" ${this._working ? "disabled" : ""}>${this._working ? "Starter …" : "Start skanning"}</button>
       </section>`;
   }
 
@@ -325,6 +466,24 @@ class NimlyManagerPanel extends HTMLElement {
     if (sessionId) {
       this.shadowRoot.getElementById("confirm")?.addEventListener("click", () => this._confirm(sessionId));
       this.shadowRoot.getElementById("cancel")?.addEventListener("click", () => this._cancel(sessionId));
+    }
+    this.shadowRoot.getElementById("ble-name")?.addEventListener("input", (event) => {
+      this._bleName = event.target.value;
+    });
+    this.shadowRoot.getElementById("ble-slot")?.addEventListener("change", (event) => {
+      this._bleSlot = event.target.value ? Number(event.target.value) : null;
+    });
+    this.shadowRoot.getElementById("at-the-lock")?.addEventListener("change", (event) => {
+      this._atTheLock = event.target.checked;
+    });
+    this.shadowRoot.getElementById("start-scan")?.addEventListener("click", () => {
+      const input = this.shadowRoot.getElementById("ble-name");
+      if (input) this._bleName = input.value;
+      this._startScan();
+    });
+    const scanId = entry?.scan?.session_id;
+    if (scanId) {
+      this.shadowRoot.getElementById("cancel-scan")?.addEventListener("click", () => this._cancelScan(scanId));
     }
   }
 
@@ -428,7 +587,20 @@ class NimlyManagerPanel extends HTMLElement {
       .verification-box small { color: var(--secondary-text-color, #65736c); }
       .pulse-ring { display: grid; flex: 0 0 56px; width: 56px; height: 56px; place-items: center; border-radius: 50%; color: var(--primary-color, #397960); background: color-mix(in srgb, var(--primary-color, #397960) 12%, transparent); font-size: 29px; animation: pulse 2s ease-in-out infinite; }
       @keyframes pulse { 50% { box-shadow: 0 0 0 8px color-mix(in srgb, var(--primary-color, #397960) 7%, transparent); } }
-      .workflow-actions { display: flex; flex-wrap: wrap; gap: 9px; }
+      .workflow-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; }
+      .cancel-note { flex: 1 1 200px; color: var(--secondary-text-color, #65736c); font-size: 12px; }
+      .stepper.three { grid-template-columns: 1fr 1fr 1fr; }
+      .stepper.three li:not(:last-child)::after { position: absolute; z-index: 0; top: 16px; right: 7px; left: 40px; height: 2px; content: ""; background: var(--divider-color, #dce3df); }
+      .scanning-now { border-color: #d18a29; box-shadow: 0 0 0 4px rgba(209, 138, 41, .18); }
+      .finger-now { margin: 16px 0; padding: clamp(22px, 4vw, 34px); border-radius: 18px; color: #fff; background: #c2410c; text-align: center; animation: urgent .9s ease-in-out infinite; }
+      .finger-now h3 { margin: 10px 0 8px; font-size: clamp(26px, 6vw, 40px); letter-spacing: .02em; }
+      .finger-now p { margin: 0; font-size: 15px; }
+      .finger-now-icon { font-size: 48px; line-height: 1; }
+      @keyframes urgent { 50% { background: #ea580c; } }
+      .datapoint { padding: 8px 10px; border-radius: 8px; background: var(--secondary-background-color, #f4f6f5); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+      .check { display: flex; align-items: center; gap: 10px; margin: 14px 0 4px; font-weight: 600; }
+      .check input { width: 22px; min-height: 22px; height: 22px; }
+      select#ble-slot { width: 100%; font-weight: 500; }
       .success-card { display: flex; align-items: center; gap: 17px; border-color: #a8d8c0; background: linear-gradient(135deg, var(--card-background-color, #fff), #eef9f3); }
       .success-card h2, .success-card p { margin-bottom: 4px; }
       .success-icon { display: grid; flex: 0 0 52px; height: 52px; place-items: center; border-radius: 50%; color: #fff; background: #3d9369; font-size: 27px; font-weight: 800; }
@@ -443,8 +615,8 @@ class NimlyManagerPanel extends HTMLElement {
         .section-heading { align-items: flex-start; }
         .counts, .expires { white-space: normal; text-align: right; }
         .slot-grid { grid-template-columns: repeat(5, 1fr); max-height: 350px; gap: 6px; }
-        .stepper { grid-template-columns: 1fr; gap: 12px; }
-        .stepper li:first-child::after { display: none; }
+        .stepper, .stepper.three { grid-template-columns: 1fr; gap: 12px; }
+        .stepper li:first-child::after, .stepper.three li::after { display: none; }
         .verification-box { align-items: flex-start; }
         .workflow-actions .primary, .workflow-actions .secondary { flex: 1 1 100%; }
       }
