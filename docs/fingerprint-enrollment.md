@@ -346,3 +346,26 @@ uv run --extra ble nimly-ble-owner enroll --name Dor --at-the-lock
 ```
 
 Deretter steg 3 uten batteriuttak: `nimly-ble-probe scan` skal se låsen.
+
+### Steg 2 utført mot fysisk lås (2026-10-20)
+
+Første maskinvaretest av onesti-lock sin eier-flyt noensinne, fra en Mac ved
+døra (−74 dBm), rett etter batteriuttak:
+
+- `preflight`: link-handshake OK (ECDH med reversert secret + AES-128-CBC
+  interopererer med låsen), `DeviceModelGet` = NimlyPro (23),
+  fingeravtrykk-kapabel, **fabrikknøkkelen `0x11`×16 godtatt** på firmware
+  4.8.3. Fjerde og sterkeste bevis for `factory`.
+- `enroll --name Dor`: `UserAuthUpdate`, `DeviceIdSet`, `CurrentTimeSet`,
+  `ServerKeyUpdate` og `DeviceNameSet` alle godtatt → `stage: enrolled`.
+  Låsen eies nå lokalt; eiernøkkel og device-id i
+  `~/.config/nimly-manager/` (backup tatt). Zigbee urørt.
+
+Dermed er disse onesti-forbeholdene avklart mot maskinvare: ledende-null-
+padding i ECDH (virket), app-parserens seed-lesning, at fabrikknøkkelen
+godtas på gjeldende firmware, og at hele enrollment-sekvensen aksepteres i
+appens rekkefølge. Fortsatt uavklart: `credentials`-byten, og om låsen
+faktisk sjekker device-id (vi sender den vi satte, som appen).
+
+Neste: steg 3 (kontinuerlig annonsering uten batteriuttak), så steg 4
+(slot-kartlegging ved første `fingerprint-scan`).
