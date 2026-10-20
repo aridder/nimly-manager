@@ -262,3 +262,46 @@ men ikke BLE-stack.
      (ingen proxy nødvendig for seed-sjekken).
 2. **Bekreft app-status.** Ble den nye modulen noen gang lagt til i den
    offisielle Nimly BLE-appen? Det avgjør `enrolled`-raden over.
+
+## Målarkitektur: BLE starter, Zigbee verifiserer
+
+Besluttet 2026-10-20. Batteriuttaket er en **engangskostnad** for selve
+eier-enrollmenten, ikke noe som skal gjøres per finger: en u-enrollet modul
+annonserer bare i pairing-vinduet, en enrollet modul formodentlig kontinuerlig
+(onesti sitt «presumably» — bekreftes i steg 3). Derfor er hybriden:
+
+| Lag | Transport | Hva |
+|---|---|---|
+| Daglig drift | Zigbee (Z2M) | lås/opp, batteri, hvem låste opp (slot + kilde), PIN set/clear. Primær, uendret. |
+| Admin/credentials | BLE via proxy | `FingerprintScan`/`Clear`, RFID scan/clear, master-PIN, tastatur, volum, logg. Det Zigbee ikke kan. |
+| Verifisering | Zigbee | første `LOCKED → UNLOCKED` fra forventet slot med fingerprint-kilde. Dagens flyt, uendret. |
+
+Dagens `FingerprintEnrollment`-domeneobjekt og event-verifiseringen beholdes.
+Det eneste som byttes ut er trinnet «gå til låsen og gjør masterfinger-
+sekvensen»: HA sender i stedet `FingerprintScan` til valgt slot, brukeren
+legger fingeren på, og Zigbee-verifiseringen bekrefter som før.
+
+### Sekvensert plan
+
+1. **Proxy.** ESPHome `bluetooth_proxy` (`active: true`) på ESP32 nær døra
+   (eget repo: `esphome`). Mål: HA ser låsen rundt −75 dBm, slik Mac-proben
+   gjorde ved døra 2026-10-20, ikke −98 som fra HA-verten.
+2. **Engangs eier-enrollment** (ett batteriuttak). Lokal flyt per
+   onesti-lock: default-nøkkel → `UserAuthUpdate` (ECDH-avledet eiernøkkel,
+   lagres i HA-storage) → `DeviceIdSet` → `CurrentTimeSet` → `ServerKeyUpdate`
+   (egen nøkkel) → `DeviceNameSet`. Første maskinvaretest av denne flyten
+   noensinne; egen, bevisst økt. Zigbee røres ikke.
+3. **Bekreft kontinuerlig annonsering** etter enrollment, uten batteriuttak.
+   Hvis den uteblir, er «presumably» feil og planen må revideres her.
+4. **Slot-kartlegging, empirisk.** BLE nummererer fingeravtrykk 150–199, Zigbee
+   ZCL rapporterer 0–999 med master først; kanalene er *ikke* like. Første
+   BLE-enrollment avslører hvilken Zigbee-slot den rapporteres som. Ingen
+   automatisk mapping før dette er observert.
+5. **`FingerprintScan` i nimly-manager**: én eksplisitt action, krever at
+   brukeren står ved låsen, hard timeout, lokal cancel, avviser ukjent modell/
+   firmware, logger aldri nøkler. Verifisering via dagens Zigbee-flyt.
+6. Deretter, hver for seg og med samme forsiktighet: `FingerprintClear`
+   (destruktiv — slot-semantikk må være bevist i steg 4 først), RFID, master-PIN.
+
+Produksjons-BLE går gjennom HAs `bluetooth`-integrasjon (proxy-kompatibel),
+ikke proben. Proben er fortsatt bare lese-verktøy for seed og firmware.
