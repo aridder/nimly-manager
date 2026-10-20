@@ -149,6 +149,7 @@ def test_diagnostics_never_retain_raw_payload_or_pin() -> None:
         "lock_state",
         "last_mqtt_at",
         "fingerprint_enrollment",
+        "fingerprint_scan",
         "fingerprint_slot_counts",
     }
     assert "8472" not in repr(diagnostics)

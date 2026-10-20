@@ -51,15 +51,75 @@ class NimlyAdvertisement:
         if self.service_data is None:
             return "not_present"
         if len(self.service_data) == 10:
-            # Observed physically from a Connect Module while the official
-            # app's Add device flow was active. Keep the value opaque until
-            # the two extra bytes have been verified by a packet capture.
-            return "connect_module_token_observed"
+            # Connect Module observed in the field: [seed 2][id 6][trailer 2].
+            # The 6-byte id is the lock's own BLE address, byte-reversed on the
+            # air; the trailing two bytes were 00 00 in the capture.
+            return "connect_module_seed_id_trailer"
         if len(self.service_data) == 8:
-            # Reverse-engineering documents two 8-byte variants. Without a
-            # known device id they cannot be distinguished safely.
+            # The layout the vendor app parses: [seed 2][id 6].
             return "seed_and_device_token"
         return "unknown"
+
+    @property
+    def _seed(self) -> bytes | None:
+        """The first two service-data bytes, which the vendor app reads as seed.
+
+        The vendor's own ``BleScanner`` takes the first 8 bytes as
+        ``[seed: 2B][identifier: 6B]`` and ignores anything past them, and it
+        recognises an *enrolled* lock by comparing those 6 id bytes to
+        ``SHA-1(seed || deviceId)[0:6]``. Of the three ways a 10-byte payload
+        could be laid out, only ``[seed][id][trailer]`` lets that comparison
+        succeed on an enrolled lock — the other two would make the app read a
+        wrong id and never find its own locks, which it demonstrably does.
+        So the seed is always the first two bytes, at any length we accept.
+        The 2026-10-20 capture settled it: id == reversed advertising address,
+        confirming seed-first with a trailing pad. See
+        ``docs/fingerprint-enrollment.md``.
+        """
+
+        data = self.service_data
+        if data is None or len(data) not in (8, 10):
+            return None
+        return data[0:2]
+
+    @property
+    def enrollment_state(self) -> str:
+        """Factory-fresh vs enrolled BLE state, from the seed.
+
+        Seed ``00 00`` means a lock never enrolled over BLE (the default owner
+        key still opens it, and local owner enrollment needs no factory reset);
+        any other seed means an enrolled lock. An unrecognised length, or no
+        service data, is ``unknown`` — never a guess. See ``_seed`` for why the
+        seed is trusted at offset 0 even for the 10-byte payload.
+        """
+
+        seed = self._seed
+        if seed is None:
+            return "unknown"
+        return "factory" if seed == b"\x00\x00" else "enrolled"
+
+    @property
+    def identifier_matches_address(self) -> bool | None:
+        """Whether the 6-byte identifier is this lock's reversed BLE address.
+
+        True/False when both the identifier and a MAC-shaped address are
+        available, else None (e.g. a macOS CoreBluetooth UUID, which is not a
+        MAC). A match corroborates the seed-first layout and the factory
+        reading in one stroke; a miss does not flip the verdict.
+        """
+
+        data = self.service_data
+        if data is None or len(data) not in (8, 10):
+            return None
+        identifier = data[2:8]
+        hex_only = self.address.replace(":", "").replace("-", "")
+        try:
+            address_bytes = bytes.fromhex(hex_only)
+        except ValueError:
+            return None
+        if len(address_bytes) != 6:
+            return None
+        return identifier[::-1] == address_bytes
 
     def as_dict(self, *, reveal_identifiers: bool = False) -> dict[str, object]:
         result: dict[str, object] = {
@@ -68,6 +128,8 @@ class NimlyAdvertisement:
             "rssi": self.rssi,
             "matched_by": list(self.matched_by),
             "service_data_kind": self.service_data_kind,
+            "enrollment_state": self.enrollment_state,
+            "identifier_matches_address": self.identifier_matches_address,
             "service_data_length": (
                 len(self.service_data) if self.service_data is not None else None
             ),

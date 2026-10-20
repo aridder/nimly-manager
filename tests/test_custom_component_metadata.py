@@ -11,6 +11,7 @@ def test_manifest_declares_panel_dependencies_and_config_flow() -> None:
     assert manifest["domain"] == "nimly_manager"
     assert manifest["config_flow"] is True
     assert set(manifest["dependencies"]) >= {
+        "bluetooth",
         "frontend",
         "http",
         "mqtt",
@@ -30,7 +31,9 @@ def test_translation_files_are_valid_json() -> None:
             (COMPONENT / "translations" / f"{language}.json").read_text()
         )
         assert translated["config"]["step"]["user"]["data"]
+        assert translated["options"]["step"]["init"]["data"]["owner_record"]
     assert source["config"]["error"]["wildcard_not_allowed"]
+    assert source["options"]["error"]["invalid_owner_record"]
 
 
 def test_service_descriptions_exist_for_all_enrollment_actions() -> None:
@@ -39,6 +42,9 @@ def test_service_descriptions_exist_for_all_enrollment_actions() -> None:
     assert "start_fingerprint_enrollment:" in services
     assert "confirm_fingerprint_enrollment:" in services
     assert "cancel_fingerprint_enrollment:" in services
+    assert "start_fingerprint_scan:" in services
+    assert "cancel_fingerprint_scan:" in services
+    assert "at_the_lock:" in services
 
 
 def test_hacs_metadata_and_brand_asset_exist() -> None:
@@ -66,3 +72,28 @@ def test_admin_panel_asset_contains_enrollment_flow() -> None:
     assert '"nimly_manager/enrollment/start"' in source
     assert '"nimly_manager/enrollment/confirm"' in source
     assert '"nimly_manager/enrollment/cancel"' in source
+    assert '"nimly_manager/fingerprint_scan/start"' in source
+    assert '"nimly_manager/fingerprint_scan/cancel"' in source
+    assert "NÅ" in source  # the finger-on-now prompt
+
+
+def test_panel_version_matches_release() -> None:
+    manifest = json.loads((COMPONENT / "manifest.json").read_text())
+    panel = (COMPONENT / "panel.py").read_text()
+
+    assert f'PANEL_VERSION = "{manifest["version"]}"' in panel
+
+
+def test_library_ships_inside_the_component() -> None:
+    package = COMPONENT / "nimly_ble"
+    assert (package / "session.py").is_file()
+    assert (package / "constants.py").is_file()
+    for module in package.glob("*.py"):
+        if module.name == "cli.py":  # laptop-only; imports the probe for scanning
+            continue
+        imports = [
+            line
+            for line in module.read_text().splitlines()
+            if line.startswith(("import ", "from "))
+        ]
+        assert not any("nimly_ble_probe" in line for line in imports), module.name

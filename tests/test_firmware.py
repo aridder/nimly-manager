@@ -14,6 +14,7 @@ def test_observed_firmware_is_below_documented_model_query_gate() -> None:
         "firmware_parsed": True,
         "ble_connection_documented": True,
         "device_model_query_documented": False,
+        "fingerprint_scan_command_documented": False,
         "fingerprint_enrollment": "unverified",
     }
 
@@ -22,8 +23,19 @@ def test_gate_accepts_minimum_version() -> None:
     assert compatibility_for("4.7.90")["device_model_query_documented"] is True
 
 
+def test_new_module_firmware_clears_admin_command_gate() -> None:
+    result = compatibility_for("4.8.03")
+
+    assert result["ble_connection_documented"] is True
+    assert result["device_model_query_documented"] is True
+    assert result["fingerprint_scan_command_documented"] is True
+    # The command being documented is not the same as enrollment being proven.
+    assert result["fingerprint_enrollment"] == "unverified"
+
+
 def test_unparseable_firmware_does_not_claim_support() -> None:
     result = compatibility_for("unknown")
 
     assert result["firmware_parsed"] is False
     assert result["ble_connection_documented"] == "unknown"
+    assert result["fingerprint_scan_command_documented"] == "unknown"

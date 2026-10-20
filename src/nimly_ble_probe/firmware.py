@@ -28,12 +28,21 @@ def compatibility_for(value: str) -> dict[str, bool | str]:
             "firmware_parsed": False,
             "ble_connection_documented": "unknown",
             "device_model_query_documented": "unknown",
+            "fingerprint_scan_command_documented": "unknown",
             "fingerprint_enrollment": "unverified",
         }
+
+    # The documented 4.7.90 floor covers DeviceModelGet, the admin command
+    # set and the FingerprintScan (0x57) command itself. Clearing that floor
+    # means the command exists in the protocol for this firmware; it does not
+    # mean enrollment has been proven against hardware, so that stays
+    # "unverified" until a lock confirms it.
+    admin_commands_documented = version >= FirmwareVersion(4, 7, 90)
 
     return {
         "firmware_parsed": True,
         "ble_connection_documented": version >= FirmwareVersion(4, 6, 0),
-        "device_model_query_documented": version >= FirmwareVersion(4, 7, 90),
+        "device_model_query_documented": admin_commands_documented,
+        "fingerprint_scan_command_documented": admin_commands_documented,
         "fingerprint_enrollment": "unverified",
     }

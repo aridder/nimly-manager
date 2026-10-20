@@ -58,3 +58,59 @@ cancel_fingerprint_enrollment:
       required: true
       selector:
         text:
+
+start_fingerprint_scan:
+  name: Start fingeravtrykkskann over Bluetooth
+  description: >-
+    Send FingerprintScan til låsen via Home Assistants Bluetooth (proxy).
+    Låsen svarer først når skanningen er ferdig, så fingeren må på sensoren
+    idet kommandoen sendes. Første fingeravtrykk-opplåsing etterpå verifiserer
+    over Zigbee. Krever importert eiernøkkel og at du står ved låsen.
+  fields:
+    config_entry_id:
+      name: Lås
+      required: true
+      selector:
+        config_entry:
+          integration: nimly_manager
+    person_id:
+      name: Person-ID
+      required: false
+      selector:
+        text:
+    person_name:
+      name: Navn
+      required: true
+      selector:
+        text:
+    ble_slot:
+      name: BLE-slot
+      description: Låsens BLE-nummerering for fingeravtrykk, 150–199. Ikke Zigbee-slot.
+      required: true
+      selector:
+        number:
+          min: 150
+          max: 199
+          mode: box
+    at_the_lock:
+      name: Jeg står ved låsen
+      description: Må være på. Fingeren skal på sensoren i samme sekund som kommandoen sendes.
+      required: true
+      selector:
+        boolean:
+
+cancel_fingerprint_scan:
+  name: Avbryt fingeravtrykkskann
+  description: Avbryt den aktive BLE-skanningen lokalt. Låsen kan fullføre en skanning som allerede er startet.
+  fields:
+    config_entry_id:
+      name: Lås
+      required: true
+      selector:
+        config_entry:
+          integration: nimly_manager
+    session_id:
+      name: Session-ID
+      required: true
+      selector:
+        text:

@@ -60,7 +60,8 @@ def _print_scan(items: list[object], as_json: bool) -> None:
         print(
             f"{item['probe_id']}  name={item['name'] or '-'}  "
             f"rssi={item['rssi'] if item['rssi'] is not None else '-'}  "
-            f"service_data={item['service_data_kind']}"
+            f"service_data={item['service_data_kind']}  "
+            f"enrollment={item['enrollment_state']}"
         )
 
 

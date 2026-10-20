@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "nimly-manager"
-version = "0.2.1"
+version = "0.3.0"
 description = "Lokale støtteverktøy for Nimly Manager"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -12,19 +12,31 @@ license = {text = "MIT"}
 dependencies = []
 
 [project.optional-dependencies]
-ble = ["bleak>=0.22,<3"]
-test = ["pytest>=8,<10"]
+ble = ["bleak>=0.22,<3", "cryptography>=42,<46"]
+test = ["pytest>=8,<10", "pytest-asyncio>=0.23,<2", "cryptography>=42,<46"]
+
+[dependency-groups]
+# Runtime side of hatchling's exact editable mode (dev-mode-exact), which maps
+# nimly_ble to its directory inside the integration without putting the whole
+# component folder on sys.path.
+dev = ["editables>=0.5"]
 
 [project.scripts]
 nimly-ble-probe = "nimly_ble_probe.cli:main"
+nimly-ble-owner = "nimly_ble.cli:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/nimly_ble_probe"]
+# nimly_ble lives inside the integration so HACS ships it; the wheel and the
+# editable install expose it as the top-level package the CLI imports.
+only-include = ["src/nimly_ble_probe", "custom_components/nimly_manager/nimly_ble"]
+dev-mode-exact = true
 
-[tool.hatch.build.targets.wheel.force-include]
-"custom_components/nimly_manager" = "custom_components/nimly_manager"
+[tool.hatch.build.targets.wheel.sources]
+"src" = ""
+"custom_components/nimly_manager/nimly_ble" = "nimly_ble"
 
 [tool.pytest.ini_options]
 addopts = "-q"
+asyncio_mode = "auto"
 pythonpath = ["."]
 testpaths = ["tests"]
