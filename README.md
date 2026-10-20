@@ -109,6 +109,11 @@ uv run --extra ble nimly-ble-probe inspect <probe-id>
 `inspect` gjør bare GATT-lesing. Verktøyet har ingen kommandoer for å låse opp,
 endre PIN/RFID, starte fingerprint-enrollment eller slette data.
 
+Skriving til låsen bor i et eget verktøy, `nimly-ble-owner` (pakken
+`src/nimly_ble/`), med `preflight`, `enroll` og `fingerprint-scan`. Det er
+forsknings- og engangsverktøy for en laptop ved døra, ikke
+produksjonstransporten; se [fingerprint-enrollment.md](docs/fingerprint-enrollment.md).
+
 På macOS må Codex/terminalprosessen ha Bluetooth-tilgang. Låsen kan også måtte
 vekkes fysisk før den annonserer.
 

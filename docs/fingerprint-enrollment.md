@@ -305,3 +305,44 @@ legger fingeren på, og Zigbee-verifiseringen bekrefter som før.
 
 Produksjons-BLE går gjennom HAs `bluetooth`-integrasjon (proxy-kompatibel),
 ikke proben. Proben er fortsatt bare lese-verktøy for seed og firmware.
+
+### Steg 2: verktøyet er klart (2026-10-20)
+
+Pakken `src/nimly_ble/` implementerer link-krypto, ramming, session og
+eier-flytene, transport-uavhengig (bleak nå, HA `bluetooth` senere). Alle
+implementasjonsvalg er sjekket mot onesti-lock sitt Python-bibliotek (ingen
+avvik), og krypto/ramming er verifisert mot onesti sine uavhengige vektorer
+(NIST CAVS + appens klasser kjørt på JDK) i `tests/test_nimly_ble_vectors.py`.
+En fake lås i `tests/test_nimly_ble.py` dekker hele flyten begge veier.
+Fortsatt: **ingenting er kjørt mot en fysisk lås.**
+
+Sikkerhetsegenskaper som er testet:
+
+- `enroll` nekter uten en bestått `preflight` siste 30 min, uten seed `00 00`,
+  uten `--at-the-lock`, og hvis en eierpost allerede finnes.
+- Eiernøkkelen skrives write-ahead (fsync, 0600) til
+  `~/.config/nimly-manager/owner-<adresse>.json` i samme øyeblikk
+  `UserAuthUpdate` svarer, **før** neste kommando. Fila er låsens nøkkel: ikke
+  i repo, ikke i scratch, ikke del den. Flyttes til HA `Store` i steg 5.
+- `UserAuthBegin` mot en u-enrollet lås bruker all-null device-id, ikke den
+  annonserte identifikatoren.
+- `fingerprint-scan` godtar bare BLE-slot 150–199 og mapper ikke til Zigbee.
+  `FingerprintClear` er ikke implementert.
+
+Slik kjøres det, **fra worktree-katalogen** (hovedutsjekken er på `main` og
+har ikke koden), ved døra, rett etter batteriuttak:
+
+```bash
+uv run --extra ble nimly-ble-owner preflight
+```
+
+Ser du `default_owner_auth: True`, `model: NimlyPro… ` og
+`fingerprint_capable: True`, er krypto-interop, ramming og fabrikknøkkelen
+bevist mot låsen — fjerde bevis for factory. Da, og bare da, i samme
+batterivindu:
+
+```bash
+uv run --extra ble nimly-ble-owner enroll --name Dor --at-the-lock
+```
+
+Deretter steg 3 uten batteriuttak: `nimly-ble-probe scan` skal se låsen.
