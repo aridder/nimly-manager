@@ -140,8 +140,13 @@ async def fingerprint_scan(
     response_seconds = round(time.monotonic() - sent_at, 1)
     reported_slot, lock_status = protocol.parse_fingerprint_scan(response.payload)
     status_name = {
-        0: "ok", 1: "error", 2: "unknown_command", 3: "crc_error",
-        4: "invalid_data", 5: "no_space_left", 6: "no_match",
+        0: "ok",
+        1: "error",
+        2: "unknown_command",
+        3: "crc_error",
+        4: "invalid_data",
+        5: "no_space_left",
+        6: "no_match",
     }.get(lock_status, f"unknown_{lock_status}")
 
     # The finger goes on now; the lock reports UserAdded as an event.

@@ -9,15 +9,21 @@ from pathlib import Path
 
 import pytest
 
-from nimly_ble import crypto, enrollment, protocol
-from nimly_ble.keystore import OwnerKeyStore
-from nimly_ble.protocol import Command, CommandId, PacketType, Response
-from nimly_ble.session import CommandFailed, Session
+from custom_components.nimly_manager.nimly_ble import crypto, enrollment, protocol
+from custom_components.nimly_manager.nimly_ble.keystore import OwnerKeyStore
+from custom_components.nimly_manager.nimly_ble.protocol import (
+    Command,
+    CommandId,
+    PacketType,
+    Response,
+)
+from custom_components.nimly_manager.nimly_ble.session import CommandFailed, Session
 
 FW = (4, 8, 3)
 
 
 # ------------------------------------------------------------------ crypto
+
 
 def test_wire_public_key_roundtrip_is_little_endian_per_coordinate() -> None:
     private = crypto.generate_key_pair()
@@ -47,13 +53,18 @@ def test_cbc_zero_pads_and_is_one_run_per_message() -> None:
 
 
 def test_owner_auth_answer_is_encrypted_inverted_nonce() -> None:
-    owner, iv, nonce = secrets.token_bytes(16), secrets.token_bytes(16), secrets.token_bytes(16)
+    owner, iv, nonce = (
+        secrets.token_bytes(16),
+        secrets.token_bytes(16),
+        secrets.token_bytes(16),
+    )
     challenge = crypto.make_owner_challenge(owner, iv, nonce)
     answer = crypto.owner_auth_answer(owner, iv, challenge)
     assert crypto.decrypt(owner, iv, answer) == crypto.bit_invert(nonce)
 
 
 # ---------------------------------------------------------------- framing
+
 
 def test_short_payload_is_a_single_packet() -> None:
     frames = protocol.frame_payload(b"x" * 12, encrypted=False)
@@ -89,9 +100,13 @@ def test_command_ref_counter_wraps_at_127_and_is_fixed_below_gate() -> None:
 
 
 def test_payload_builders_and_ranges() -> None:
-    assert protocol.device_name_payload("Dør".encode("ascii", "ignore").decode()) == b"Dr" + bytes(7)
+    assert protocol.device_name_payload(
+        "Dør".encode("ascii", "ignore").decode()
+    ) == b"Dr" + bytes(7)
     assert protocol.device_name_payload("abcdefghij") == b"abcdefgh\x00"
-    assert protocol.current_time_payload(protocol.TIME_EPOCH_UNIX + 120) == (2).to_bytes(4, "little")
+    assert protocol.current_time_payload(protocol.TIME_EPOCH_UNIX + 120) == (
+        2
+    ).to_bytes(4, "little")
     with pytest.raises(protocol.ProtocolError):
         protocol.current_time_payload(protocol.TIME_EPOCH_UNIX - 60)
     assert protocol.fingerprint_slot_payload(150) == b"\x96\x00"
@@ -103,6 +118,7 @@ def test_payload_builders_and_ranges() -> None:
 
 
 # -------------------------------------------------------------- fake lock
+
 
 class FakeLock:
     """Transport whose far end behaves like a factory-fresh fingerprint lock."""
@@ -120,6 +136,7 @@ class FakeLock:
         self.authenticated = False
         self.seen: list[CommandId] = []
         self.auth_begin_device_id: bytes | None = None
+        self.scanned_slots: list[int] = []
         self._reasm = protocol.Reassembler()
         self._handler: Callable[[bytes], None] | None = None
         self._loop = None
@@ -161,17 +178,30 @@ class FakeLock:
             self.link = crypto.LinkKeys.from_reversed_secret(
                 crypto.reversed_shared_secret(private, body)
             )
-            return [self._resp(cid, ref, 0, crypto.public_key_to_wire(private.public_key()))]
+            return [
+                self._resp(cid, ref, 0, crypto.public_key_to_wire(private.public_key()))
+            ]
         assert self.link is not None
         if cid == CommandId.DEVICE_MODEL_GET:
             return [self._resp(cid, ref, 0, bytes([self.model]))]
         if cid == CommandId.USER_AUTH_BEGIN:
             self.auth_begin_device_id = body[1:7]
             self.auth_nonce = secrets.token_bytes(16)
-            return [self._resp(cid, ref, 0, crypto.make_owner_challenge(self.owner_key, self.link.iv, self.auth_nonce))]
+            return [
+                self._resp(
+                    cid,
+                    ref,
+                    0,
+                    crypto.make_owner_challenge(
+                        self.owner_key, self.link.iv, self.auth_nonce
+                    ),
+                )
+            ]
         if cid == CommandId.USER_AUTH_FINALIZE:
             assert self.auth_nonce is not None
-            expected = crypto.encrypt(self.owner_key, self.link.iv, crypto.bit_invert(self.auth_nonce))
+            expected = crypto.encrypt(
+                self.owner_key, self.link.iv, crypto.bit_invert(self.auth_nonce)
+            )
             if body != expected:
                 return [self._resp(cid, ref, protocol.ResponseStatus.SECURITY_ERROR)]
             self.authenticated = True
@@ -183,7 +213,9 @@ class FakeLock:
             self.owner_key = crypto.owner_key_from_reversed_secret(
                 crypto.reversed_shared_secret(private, body[2:66])
             )
-            return [self._resp(cid, ref, 0, crypto.public_key_to_wire(private.public_key()))]
+            return [
+                self._resp(cid, ref, 0, crypto.public_key_to_wire(private.public_key()))
+            ]
         if cid == CommandId.DEVICE_ID_SET:
             self.device_id = body
             return [self._resp(cid, ref, 0)]
@@ -193,13 +225,17 @@ class FakeLock:
         if cid == CommandId.SERVER_KEY_UPDATE:
             self.server_key = body
             private = crypto.generate_key_pair()
-            return [self._resp(cid, ref, 0, crypto.public_key_to_wire(private.public_key()))]
+            return [
+                self._resp(cid, ref, 0, crypto.public_key_to_wire(private.public_key()))
+            ]
         if cid == CommandId.DEVICE_NAME_SET:
             self.name = body
             return [self._resp(cid, ref, 0)]
         if cid == CommandId.FINGERPRINT_SCAN:
-            slot = int.from_bytes(body, "little")
-            event = self._resp(protocol.EventId.USER_ADDED, protocol.EVENT_REF, 0, body + b"\x03")
+            self.scanned_slots.append(int.from_bytes(body, "little"))
+            event = self._resp(
+                protocol.EventId.USER_ADDED, protocol.EVENT_REF, 0, body + b"\x03"
+            )
             return [self._resp(cid, ref, 0, body + b"\x00"), event]
         return [self._resp(cid, ref, protocol.ResponseStatus.NOT_SUPPORTED)]
 
@@ -221,10 +257,14 @@ async def test_preflight_handshakes_reads_model_and_default_auths() -> None:
 async def test_enroll_requires_recent_preflight(tmp_path: Path) -> None:
     store = OwnerKeyStore(tmp_path)
     with pytest.raises(enrollment.EnrollmentRefused):
-        await enrollment.enroll(_session(FakeLock()), store, lock_address="AA", name="Dor")
+        await enrollment.enroll(
+            _session(FakeLock()), store, lock_address="AA", name="Dor"
+        )
 
 
-async def test_enroll_persists_owner_key_before_any_further_write(tmp_path: Path) -> None:
+async def test_enroll_persists_owner_key_before_any_further_write(
+    tmp_path: Path,
+) -> None:
     store = OwnerKeyStore(tmp_path)
     store.mark_preflight("AA", {"default_owner_auth": True})
     lock = FakeLock(fail_at=CommandId.DEVICE_ID_SET)
@@ -236,30 +276,47 @@ async def test_enroll_persists_owner_key_before_any_further_write(tmp_path: Path
     assert store.path_for("AA").stat().st_mode & 0o777 == 0o600
 
 
-async def test_enroll_completes_in_the_apps_order_and_stored_key_opens_lock(tmp_path: Path) -> None:
+async def test_enroll_completes_in_the_apps_order_and_stored_key_opens_lock(
+    tmp_path: Path,
+) -> None:
     store = OwnerKeyStore(tmp_path)
     store.mark_preflight("AA", {"default_owner_auth": True})
     lock = FakeLock()
     record = await enrollment.enroll(
-        _session(lock), store, lock_address="AA", name="Dor", now=protocol.TIME_EPOCH_UNIX + 600
+        _session(lock),
+        store,
+        lock_address="AA",
+        name="Dor",
+        now=protocol.TIME_EPOCH_UNIX + 600,
     )
     assert record.stage == "enrolled"
     assert lock.seen[-5:] == [
-        CommandId.USER_AUTH_UPDATE, CommandId.DEVICE_ID_SET, CommandId.CURRENT_TIME_SET,
-        CommandId.SERVER_KEY_UPDATE, CommandId.DEVICE_NAME_SET,
+        CommandId.USER_AUTH_UPDATE,
+        CommandId.DEVICE_ID_SET,
+        CommandId.CURRENT_TIME_SET,
+        CommandId.SERVER_KEY_UPDATE,
+        CommandId.DEVICE_NAME_SET,
     ]
-    assert lock.device_id == record.device_id and lock.time == 10 and lock.name == b"Dor" + bytes(6)
+    assert (
+        lock.device_id == record.device_id
+        and lock.time == 10
+        and lock.name == b"Dor" + bytes(6)
+    )
     assert record.server_private_pem.startswith("-----BEGIN PRIVATE KEY-----")
     # A second enrollment is refused; the stored key authenticates a new session.
     with pytest.raises(enrollment.EnrollmentRefused):
         await enrollment.enroll(_session(lock), store, lock_address="AA", name="Dor")
     session = _session(lock)
     await session.handshake()
-    await session.owner_authenticate(record.owner_key, user_id=0, device_id=record.device_id)
+    await session.owner_authenticate(
+        record.owner_key, user_id=0, device_id=record.device_id
+    )
     assert lock.authenticated and lock.auth_begin_device_id == record.device_id
 
 
-async def test_fingerprint_scan_uses_stored_owner_and_collects_user_added(tmp_path: Path) -> None:
+async def test_fingerprint_scan_uses_stored_owner_and_collects_user_added(
+    tmp_path: Path,
+) -> None:
     store = OwnerKeyStore(tmp_path)
     store.mark_preflight("AA", {"default_owner_auth": True})
     lock = FakeLock()
@@ -268,13 +325,18 @@ async def test_fingerprint_scan_uses_stored_owner_and_collects_user_added(tmp_pa
         _session(lock), store, lock_address="AA", slot=150, event_wait=2
     )
     assert result["reported_slot"] == 150 and result["scan_status"] == "ok"
-    assert result["user_added_events"] == [{"event": "user_added", "slot": 150, "status": "fingerprint"}]
+    assert result["user_added_events"] == [
+        {"event": "user_added", "slot": 150, "status": "fingerprint"}
+    ]
 
 
 async def test_fingerprint_scan_refuses_without_enrolled_record(tmp_path: Path) -> None:
-    from nimly_ble.keystore import KeyStoreError
+    from custom_components.nimly_manager.nimly_ble.keystore import KeyStoreError
+
     with pytest.raises(KeyStoreError):
-        await enrollment.fingerprint_scan(_session(FakeLock()), OwnerKeyStore(tmp_path), lock_address="AA", slot=150)
+        await enrollment.fingerprint_scan(
+            _session(FakeLock()), OwnerKeyStore(tmp_path), lock_address="AA", slot=150
+        )
 
 
 async def test_wrong_owner_key_is_rejected_by_lock() -> None:
@@ -287,5 +349,12 @@ async def test_wrong_owner_key_is_rejected_by_lock() -> None:
 
 
 def test_event_parsing() -> None:
-    lock_status = Response(protocol.EventId.LOCK_STATUS, protocol.EVENT_REF, 0, b"\x96\x00\x02\x03")
-    assert protocol.parse_event(lock_status) == {"event": "lock_status", "slot": 150, "state": "unlocked", "method": "fingerprint"}
+    lock_status = Response(
+        protocol.EventId.LOCK_STATUS, protocol.EVENT_REF, 0, b"\x96\x00\x02\x03"
+    )
+    assert protocol.parse_event(lock_status) == {
+        "event": "lock_status",
+        "slot": 150,
+        "state": "unlocked",
+        "method": "fingerprint",
+    }

@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from cryptography.hazmat.primitives.asymmetric import ec
 
-from nimly_ble import crypto, protocol
-from nimly_ble.protocol import Command, CommandId
+from custom_components.nimly_manager.nimly_ble import crypto, protocol
+from custom_components.nimly_manager.nimly_ble.protocol import Command, CommandId
 
 H = bytes.fromhex
 
@@ -22,7 +22,9 @@ CAVS_PEER_PUBLIC_WIRE = H(
     "87d2338883cce72cb4f64d3aceac6b1bb90d6465ca32c65c4c58567ff7480c70"
     "aca45fb8ca821744e0df40f6fb468d94c5dc515cba20db0d069bfde309e571db"
 )
-CAVS_SHARED_SECRET_REVERSED = H("7bbd978977d70d04681e56602085c5cc252dddfb34a4542e01ff20641062fc46")
+CAVS_SHARED_SECRET_REVERSED = H(
+    "7bbd978977d70d04681e56602085c5cc252dddfb34a4542e01ff20641062fc46"
+)
 CAVS_LINK_KEY = H("7bbd978977d70d04681e56602085c5cc")
 CAVS_LINK_IV = H("252dddfb34a4542e01ff20641062fc46")
 
@@ -52,10 +54,12 @@ def test_cavs_ecdh_wire_encoding_and_reversed_secret() -> None:
 def test_sp800_38a_cbc_and_app_zero_padding() -> None:
     assert crypto.encrypt(AES_KEY, AES_IV, AES_PLAINTEXT) == AES_CBC_CIPHERTEXT
     assert crypto.decrypt(AES_KEY, AES_IV, AES_CBC_CIPHERTEXT) == AES_PLAINTEXT
-    assert crypto.encrypt(AES_KEY, AES_IV, H("0102030405")) == H("2d971c5ddabf641d9a013db4f06d296f")
-    assert crypto.encrypt(AES_KEY, AES_IV, H("000102030405060708090a0b0c0d0e0f10")) == H(
-        "7df76b0c1ab899b33e42f047b91b546f09961489d1984ceac1b48410a277fbeb"
+    assert crypto.encrypt(AES_KEY, AES_IV, H("0102030405")) == H(
+        "2d971c5ddabf641d9a013db4f06d296f"
     )
+    assert crypto.encrypt(
+        AES_KEY, AES_IV, H("000102030405060708090a0b0c0d0e0f10")
+    ) == H("7df76b0c1ab899b33e42f047b91b546f09961489d1984ceac1b48410a277fbeb")
 
 
 def test_owner_answer_matches_app_classes_on_jdk() -> None:
@@ -77,6 +81,8 @@ def test_frame_vectors_for_handshake_and_one_encrypted_block() -> None:
     assert frames[0] == H("0310000101100000") + enc[:12]
     assert frames[1] == H("05040002") + enc[12:]
     assert protocol.user_auth_begin_payload(0, bytes(6)) == H("00000000000000")
-    assert Command(CommandId.USER_AUTH_BEGIN, 1, protocol.user_auth_begin_payload(0, bytes(6))).to_bytes() == H("22070100") + bytes(7)
+    assert Command(
+        CommandId.USER_AUTH_BEGIN, 1, protocol.user_auth_begin_payload(0, bytes(6))
+    ).to_bytes() == H("22070100") + bytes(7)
     assert protocol.device_name_payload("Door") == b"Door" + bytes(5)
     assert (0x12345678).to_bytes(4, "little") == H("78563412")

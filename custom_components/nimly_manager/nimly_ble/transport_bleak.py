@@ -3,12 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Self
 
-from nimly_ble_probe.constants import (
-    NIMLY_COMMUNICATION_UUID,
-    SOFTWARE_REVISION_UUID,
-)
+from .constants import NIMLY_COMMUNICATION_UUID, SOFTWARE_REVISION_UUID
 
 
 class BleakTransport:
@@ -20,7 +17,7 @@ class BleakTransport:
         self._client = BleakClient(device, timeout=timeout)
         self._handler: Callable[[bytes], None] | None = None
 
-    async def __aenter__(self) -> BleakTransport:
+    async def __aenter__(self) -> Self:
         await self._client.connect()
         await self._client.start_notify(NIMLY_COMMUNICATION_UUID, self._on_notify)
         return self
@@ -39,7 +36,9 @@ class BleakTransport:
         self._handler = handler
 
     async def write(self, data: bytes) -> None:
-        await self._client.write_gatt_char(NIMLY_COMMUNICATION_UUID, data, response=True)
+        await self._client.write_gatt_char(
+            NIMLY_COMMUNICATION_UUID, data, response=True
+        )
 
     async def read_software_revision(self) -> str:
         value = await self._client.read_gatt_char(SOFTWARE_REVISION_UUID)
