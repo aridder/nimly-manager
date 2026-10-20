@@ -1,5 +1,11 @@
 # Endringslogg
 
+## 0.3.1
+
+- Samme funksjonalitet som 0.3.0. Taggen `v0.3.0` ble først laget før
+  Bluetooth-koden var merget til `main`; 0.3.1 er den første releasen der
+  versjonsnummer og kode garantert stemmer.
+
 ## 0.3.0
 
 - Fingeravtrykkskann over Bluetooth fra sidepanelet: Home Assistant sender

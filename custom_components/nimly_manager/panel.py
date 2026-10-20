@@ -16,7 +16,7 @@ from .const import (
 )
 
 PANEL_MODULE = "nimly-manager-panel.js"
-PANEL_VERSION = "0.3.0"
+PANEL_VERSION = "0.3.1"
 
 
 async def async_register_panel(hass: HomeAssistant) -> None:
