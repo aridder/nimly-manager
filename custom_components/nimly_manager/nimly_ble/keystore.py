@@ -26,9 +26,9 @@ class KeyStoreError(RuntimeError):
 class OwnerRecord:
     lock_address: str
     device_id_hex: str
-    owner_key_hex: str
-    stage: str  # owner_key_received | enrolled
-    server_private_pem: str = ""
+    owner_key_hex: str = field(repr=False)
+    stage: str = "owner_key_received"  # owner_key_received | enrolled
+    server_private_pem: str = field(default="", repr=False)
     name: str = ""
     created: float = field(default_factory=time.time)
     updated: float = field(default_factory=time.time)
@@ -40,6 +40,70 @@ class OwnerRecord:
     @property
     def device_id(self) -> bytes:
         return bytes.fromhex(self.device_id_hex)
+
+    def as_dict(self) -> dict[str, object]:
+        """Full record for a private store. Never log or expose the result."""
+
+        return asdict(self)
+
+    def public_dict(self) -> dict[str, object]:
+        """What a UI or diagnostics may see: no key, no server key."""
+
+        return {
+            "lock_address": self.lock_address,
+            "name": self.name,
+            "stage": self.stage,
+            "created": self.created,
+            "updated": self.updated,
+        }
+
+
+def owner_record_from_json(text: str) -> OwnerRecord:
+    """Parse and validate the content of an ``owner-<adresse>.json`` file.
+
+    Used for the one-time import into Home Assistant. Refuses anything that
+    is not a complete, *enrolled* record, so a half-written or preflight
+    file can never masquerade as an owner credential.
+    """
+
+    try:
+        data = json.loads(text)
+    except ValueError as error:
+        raise KeyStoreError("ugyldig JSON") from error
+    if not isinstance(data, dict):
+        raise KeyStoreError("eierposten må være et JSON-objekt")
+    try:
+        record = OwnerRecord(
+            lock_address=str(data["lock_address"]),
+            device_id_hex=str(data["device_id_hex"]).lower(),
+            owner_key_hex=str(data["owner_key_hex"]).lower(),
+            stage=str(data["stage"]),
+            server_private_pem=str(data.get("server_private_pem", "")),
+            name=str(data.get("name", "")),
+            created=float(data.get("created", time.time())),
+            updated=float(data.get("updated", time.time())),
+        )
+    except (KeyError, TypeError, ValueError) as error:
+        raise KeyStoreError("eierposten mangler felt") from error
+    if not _is_hex(record.owner_key_hex, 32):
+        raise KeyStoreError("owner_key_hex må være 16 byte hex")
+    if not _is_hex(record.device_id_hex, 12):
+        raise KeyStoreError("device_id_hex må være 6 byte hex")
+    if record.stage != "enrolled":
+        raise KeyStoreError(
+            f"eierposten er ikke ferdig enrollet (stage={record.stage})"
+        )
+    return record
+
+
+def _is_hex(value: str, length: int) -> bool:
+    if len(value) != length:
+        return False
+    try:
+        bytes.fromhex(value)
+    except ValueError:
+        return False
+    return True
 
 
 def _atomic_write(path: Path, payload: dict[str, object]) -> None:
@@ -81,7 +145,7 @@ class OwnerKeyStore:
     def save(self, record: OwnerRecord) -> Path:
         record.updated = time.time()
         path = self.path_for(record.lock_address)
-        _atomic_write(path, asdict(record))
+        _atomic_write(path, record.as_dict())
         return path
 
     def load(self, lock_address: str) -> OwnerRecord | None:
