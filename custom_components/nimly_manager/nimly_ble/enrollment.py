@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import secrets
 import time
+from collections.abc import Callable
 
 from cryptography.hazmat.primitives import serialization
 
@@ -19,6 +20,19 @@ from .protocol import CommandId
 from .session import Session
 
 MODEL_QUERY_FIRMWARE = (4, 7, 90)
+# FingerprintScan (0x57) and the rest of the admin set are documented from
+# 4.7.90; below that the lock may not even know the command.
+FINGERPRINT_SCAN_FIRMWARE = (4, 7, 90)
+
+SCAN_STATUS_NAMES = {
+    0: "ok",
+    1: "error",
+    2: "unknown_command",
+    3: "crc_error",
+    4: "invalid_data",
+    5: "no_space_left",
+    6: "no_match",
+}
 
 
 class EnrollmentRefused(RuntimeError):
@@ -140,8 +154,13 @@ async def fingerprint_scan(
     response_seconds = round(time.monotonic() - sent_at, 1)
     reported_slot, lock_status = protocol.parse_fingerprint_scan(response.payload)
     status_name = {
-        0: "ok", 1: "error", 2: "unknown_command", 3: "crc_error",
-        4: "invalid_data", 5: "no_space_left", 6: "no_match",
+        0: "ok",
+        1: "error",
+        2: "unknown_command",
+        3: "crc_error",
+        4: "invalid_data",
+        5: "no_space_left",
+        6: "no_match",
     }.get(lock_status, f"unknown_{lock_status}")
 
     # The finger goes on now; the lock reports UserAdded as an event.
@@ -159,4 +178,58 @@ async def fingerprint_scan(
         "scan_status": status_name,
         "response_seconds": response_seconds,
         "user_added_events": events,
+    }
+
+
+async def scan_fingerprint(
+    session: Session,
+    record: OwnerRecord,
+    *,
+    slot: int,
+    firmware: tuple[int, int, int],
+    on_finger_prompt: Callable[[], None] | None = None,
+) -> dict[str, object]:
+    """One FingerprintScan from an already-enrolled owner, for Home Assistant.
+
+    Unlike ``fingerprint_scan`` this takes the record directly (it lives in
+    HA's store, not a file), gates on firmware and lock model, and calls
+    ``on_finger_prompt`` right before the command goes out: the lock answers
+    only *after* the scan, so the finger has to be on the sensor at once.
+    It does not wait for events; Zigbee verifies the result afterwards.
+    """
+
+    if record.stage != "enrolled":
+        raise EnrollmentRefused("eierposten er ikke ferdig enrollet")
+    if firmware < FINGERPRINT_SCAN_FIRMWARE:
+        have = ".".join(map(str, firmware))
+        need = ".".join(map(str, FINGERPRINT_SCAN_FIRMWARE))
+        raise EnrollmentRefused(
+            f"firmware {have} er under {need}, der FingerprintScan er dokumentert"
+        )
+    payload = protocol.fingerprint_slot_payload(slot)
+
+    await session.handshake()
+    model = await session.send(CommandId.DEVICE_MODEL_GET)
+    model_id, model_name, fingerprint_capable = protocol.parse_model(model.payload)
+    if model_name == "Unknown" or not fingerprint_capable:
+        raise EnrollmentRefused(
+            f"ukjent eller ikke fingeravtrykk-kapabel modell ({model_id})"
+        )
+    await session.owner_authenticate(
+        record.owner_key, user_id=0, device_id=record.device_id
+    )
+
+    if on_finger_prompt is not None:
+        on_finger_prompt()
+    sent_at = time.monotonic()
+    response = await session.send(CommandId.FINGERPRINT_SCAN, payload)
+    response_seconds = round(time.monotonic() - sent_at, 1)
+    reported_slot, lock_status = protocol.parse_fingerprint_scan(response.payload)
+    return {
+        "requested_slot": slot,
+        "reported_slot": reported_slot,
+        "scan_status": SCAN_STATUS_NAMES.get(lock_status, f"unknown_{lock_status}"),
+        "response_seconds": response_seconds,
+        "model": f"{model_name} ({model_id})",
+        "firmware": ".".join(map(str, firmware)),
     }

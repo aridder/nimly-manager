@@ -99,6 +99,7 @@ class ProtocolError(ValueError):
 
 # ---------------------------------------------------------------- layer 1
 
+
 @dataclass(frozen=True, slots=True)
 class Packet:
     type: PacketType
@@ -200,6 +201,7 @@ class Reassembler:
 
 # ---------------------------------------------------------------- layer 2/3
 
+
 @dataclass(frozen=True, slots=True)
 class Command:
     id: CommandId
@@ -281,7 +283,9 @@ def user_auth_begin_payload(user_id: int, device_id: bytes) -> bytes:
     return bytes([user_id]) + device_id
 
 
-def user_auth_update_payload(user_id: int, credentials: int, wire_public: bytes) -> bytes:
+def user_auth_update_payload(
+    user_id: int, credentials: int, wire_public: bytes
+) -> bytes:
     if len(wire_public) != 64:
         raise ProtocolError("public key must be 64 wire bytes")
     return bytes([user_id, credentials]) + wire_public
@@ -342,7 +346,12 @@ def parse_event(response: Response) -> dict[str, object]:
     if response.id == EventId.LOCK_STATUS and len(response.payload) >= 4:
         state = {1: "locked", 2: "unlocked"}.get(response.payload[2], "unknown")
         method = {
-            0: "key", 1: "button", 2: "panel", 3: "fingerprint", 4: "rfid", 5: "other"
+            0: "key",
+            1: "button",
+            2: "panel",
+            3: "fingerprint",
+            4: "rfid",
+            5: "other",
         }.get(response.payload[3], "unknown")
         return {
             "event": "lock_status",
@@ -352,7 +361,11 @@ def parse_event(response: Response) -> dict[str, object]:
         }
     if response.id == EventId.USER_ADDED and len(response.payload) >= 3:
         status = {
-            0: "not_added", 1: "pin", 2: "rfid", 3: "fingerprint", 4: "slot_occupied"
+            0: "not_added",
+            1: "pin",
+            2: "rfid",
+            3: "fingerprint",
+            4: "slot_occupied",
         }.get(response.payload[2], "unknown")
         return {
             "event": "user_added",

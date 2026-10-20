@@ -37,3 +37,21 @@ def state_topic(base_topic: str, device_name: str) -> str:
     if device_name == base_topic or device_name.startswith(f"{base_topic}/"):
         return device_name
     return f"{base_topic}/{device_name}"
+
+
+# BLE (steg 5): one explicit scan action over Home Assistant's bluetooth stack.
+CONF_BLE_ADDRESS = "ble_address"
+CONF_OWNER_RECORD = "owner_record"
+OPTION_OWNER_KEY_IMPORTED = "owner_key_imported"
+OPTION_OWNER_NAME = "owner_name"
+
+DATA_OWNER_STORE = "owner_store"
+DATA_SCAN_COORDINATOR = "scan_coordinator"
+
+SERVICE_START_FINGERPRINT_SCAN = "start_fingerprint_scan"
+SERVICE_CANCEL_FINGERPRINT_SCAN = "cancel_fingerprint_scan"
+
+ATTR_BLE_SLOT = "ble_slot"
+ATTR_AT_THE_LOCK = "at_the_lock"
+
+EVENT_FINGERPRINT_SCAN_STATE = "nimly_fingerprint_scan_state"

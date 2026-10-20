@@ -29,6 +29,7 @@ class FingerprintSlot:
     person_id: str | None = None
     person_name: str | None = None
     verified_at: str | None = None
+    ble_slot: int | None = None
 
     def as_dict(self) -> dict[str, object]:
         """Return a JSON-serializable representation."""
@@ -42,6 +43,7 @@ class FingerprintSlot:
             "person_id": self.person_id,
             "person_name": self.person_name,
             "verified_at": self.verified_at,
+            "ble_slot": self.ble_slot,
         }
 
 
@@ -89,6 +91,7 @@ class FingerprintSlotRegistry:
                 person_id=_optional_text(raw.get("person_id")),
                 person_name=_optional_text(raw.get("person_name")),
                 verified_at=_optional_text(raw.get("verified_at")),
+                ble_slot=_optional_ble_slot(raw.get("ble_slot")),
             )
         return cls(records, on_change=on_change)
 
@@ -128,8 +131,14 @@ class FingerprintSlotRegistry:
         person_id: str,
         person_name: str,
         now: datetime,
+        ble_slot: int | None = None,
     ) -> FingerprintSlot:
-        """Promote a slot after an exact enrollment verification event."""
+        """Promote a slot after an exact enrollment verification event.
+
+        ``ble_slot`` records which BLE slot a scan used, when the enrollment
+        was started over BLE. It is kept as an observed data point only; no
+        code derives a Zigbee slot from it.
+        """
 
         record = self.observe(slot=slot, now=now)
         timestamp = _timestamp(now)
@@ -138,8 +147,19 @@ class FingerprintSlotRegistry:
         record.person_name = person_name.strip()
         record.verified_at = timestamp
         record.last_seen_at = timestamp
+        if ble_slot is not None:
+            record.ble_slot = ble_slot
         self._changed()
         return record
+
+    def used_ble_slots(self) -> list[int]:
+        """BLE slots already paired with a Zigbee slot, for the slot picker."""
+
+        return sorted(
+            record.ble_slot
+            for record in self._records.values()
+            if record.ble_slot is not None
+        )
 
     def as_list(self) -> list[dict[str, object]]:
         """Return records sorted by slot."""
@@ -177,6 +197,12 @@ def _timestamp(value: datetime) -> str:
     if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError("tidspunkt må ha tidssone")
     return value.isoformat()
+
+
+def _optional_ble_slot(value: Any) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value if 0 <= value <= 999 else None
 
 
 def _optional_text(value: Any) -> str | None:

@@ -35,9 +35,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--json", action="store_true", dest="as_json")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    sub.add_parser("preflight", help="Handshake, model og default eier-auth; endrer ingenting")
+    sub.add_parser(
+        "preflight", help="Handshake, model og default eier-auth; endrer ingenting"
+    )
 
-    enroll = sub.add_parser("enroll", help="Engangs lokal eier-enrollment (irreversibel)")
+    enroll = sub.add_parser(
+        "enroll", help="Engangs lokal eier-enrollment (irreversibel)"
+    )
     enroll.add_argument("--name", required=True, help="Låsens navn, maks 8 ASCII-tegn")
     enroll.add_argument(
         "--at-the-lock",
@@ -45,7 +49,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="Bekreft at du står ved låsen og har gjort preflight nå",
     )
 
-    scan = sub.add_parser("fingerprint-scan", help="Start fingeravtrykk-registrering i én BLE-slot")
+    scan = sub.add_parser(
+        "fingerprint-scan", help="Start fingeravtrykk-registrering i én BLE-slot"
+    )
     scan.add_argument("--slot", type=int, required=True, help="BLE-slot 150–199")
     scan.add_argument("--at-the-lock", action="store_true")
     return parser
@@ -54,7 +60,9 @@ def build_parser() -> argparse.ArgumentParser:
 async def _find_lock(scan_timeout: float):
     found = await discover_nimly(scan_timeout)
     if not found:
-        raise SessionError("fant ingen Nimly-annonsering — ta ut og inn batteriet og prøv igjen")
+        raise SessionError(
+            "fant ingen Nimly-annonsering — ta ut og inn batteriet og prøv igjen"
+        )
     if len(found) > 1:
         raise SessionError("flere Nimly-enheter funnet; flytt deg nærmere din egen")
     return found[0]
@@ -75,12 +83,16 @@ async def _run(args: argparse.Namespace) -> int:
         firmware_text = await transport.read_software_revision()
         firmware = FirmwareVersion.parse(firmware_text)
         if firmware is None or firmware < MIN_FIRMWARE:
-            raise SessionError(f"firmware {firmware_text!r} under dokumentert minimum 4.6.0")
+            raise SessionError(
+                f"firmware {firmware_text!r} under dokumentert minimum 4.6.0"
+            )
         fw = (firmware.major, firmware.minor, firmware.patch)
         session = Session(transport, firmware=fw, timeout=args.timeout)
 
         if args.command == "preflight":
-            report = await enrollment.preflight(session, lock_address=address, firmware=fw)
+            report = await enrollment.preflight(
+                session, lock_address=address, firmware=fw
+            )
             report["enrollment_state"] = adv.enrollment_state
             report["rssi"] = adv.rssi
             marker = store.mark_preflight(address, report)
@@ -93,7 +105,9 @@ async def _run(args: argparse.Namespace) -> int:
                 raise enrollment.EnrollmentRefused(
                     f"seed er ikke 00 00 (state={adv.enrollment_state}); ikke en factory-lås"
                 )
-            record = await enrollment.enroll(session, store, lock_address=address, name=args.name)
+            record = await enrollment.enroll(
+                session, store, lock_address=address, name=args.name
+            )
             _emit(
                 {
                     "stage": record.stage,

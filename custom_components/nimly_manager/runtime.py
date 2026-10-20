@@ -7,10 +7,14 @@ from datetime import datetime
 from typing import Any
 
 from .fingerprint_enrollment import (
+    FINGERPRINT_SLOT_MAX,
+    FINGERPRINT_SLOT_MIN,
+    FINGERPRINT_SOURCES,
     TERMINAL_STATES,
     FingerprintEnrollment,
     FingerprintEnrollmentError,
 )
+from .fingerprint_scan import BleFingerprintScan
 from .slots import FingerprintSlotRegistry
 
 LOCKED = "locked"
@@ -24,6 +28,7 @@ class FingerprintVerification:
     session: FingerprintEnrollment
     source: str
     user_slot: int
+    ble_slot: int | None = None
 
     def as_event_data(self) -> dict[str, object]:
         """Return event data without credentials or raw MQTT content."""
@@ -32,6 +37,7 @@ class FingerprintVerification:
             **self.session.as_public_dict(),
             "source": self.source,
             "user_id": self.user_slot,
+            "ble_slot": self.ble_slot,
         }
 
 
@@ -48,6 +54,7 @@ class NimlyLockRuntime:
         self.lock_state: str | None = None
         self.last_mqtt_at: datetime | None = None
         self.enrollment: FingerprintEnrollment | None = None
+        self.scan: BleFingerprintScan | None = None
         self.slots = slots or FingerprintSlotRegistry()
 
     def start_enrollment(
@@ -60,12 +67,7 @@ class NimlyLockRuntime:
     ) -> FingerprintEnrollment:
         """Start one session, refusing to replace an active workflow."""
 
-        if self.enrollment is not None:
-            state = self.enrollment.refresh(now=now)
-            if state not in TERMINAL_STATES:
-                raise FingerprintEnrollmentError(
-                    "låsen har allerede en aktiv fingerprint-enrollment"
-                )
+        self._refuse_if_busy(now=now)
         if self.slots.is_occupied(slot):
             raise FingerprintEnrollmentError(
                 f"fingerprint-slot {slot:03d} er allerede bekreftet opptatt"
@@ -96,6 +98,38 @@ class NimlyLockRuntime:
         session.cancel(now=now)
         return session
 
+    def start_fingerprint_scan(
+        self,
+        *,
+        person_id: str,
+        person_name: str,
+        ble_slot: int,
+        now: datetime,
+    ) -> BleFingerprintScan:
+        """Start a BLE scan session; one workflow per lock at a time."""
+
+        self._refuse_if_busy(now=now)
+        if ble_slot in self.slots.used_ble_slots():
+            raise FingerprintEnrollmentError(
+                f"BLE-slot {ble_slot} er allerede brukt for en verifisert finger"
+            )
+        self.scan = BleFingerprintScan.start(
+            person_id=person_id,
+            person_name=person_name,
+            ble_slot=ble_slot,
+            now=now,
+        )
+        return self.scan
+
+    def cancel_fingerprint_scan(
+        self, *, session_id: str, now: datetime
+    ) -> BleFingerprintScan:
+        """Cancel the exact active scan; the caller stops the BLE task."""
+
+        scan = self._scan(session_id)
+        scan.cancel(now=now)
+        return scan
+
     def observe_mqtt_state(
         self, payload: dict[str, Any], *, now: datetime
     ) -> FingerprintVerification | None:
@@ -115,11 +149,18 @@ class NimlyLockRuntime:
         user_slot = _slot(payload.get("last_unlock_user"))
         if source is None or user_slot is None:
             return None
-        if source.lower() in {"fingerprint", "fingerprintsensor"}:
+        is_fingerprint = source.lower() in FINGERPRINT_SOURCES
+        was_known = self.slots.is_occupied(user_slot)
+        if is_fingerprint:
             try:
                 self.slots.observe(slot=user_slot, now=now)
             except ValueError:
                 return None
+
+        if is_fingerprint and self._scan_claims(
+            user_slot, was_known=was_known, now=now
+        ):
+            return self._verify_scan(source=source, user_slot=user_slot, now=now)
 
         session = self.enrollment
         if session is None:
@@ -138,6 +179,60 @@ class NimlyLockRuntime:
             user_slot=user_slot,
         )
 
+    def _scan_claims(self, user_slot: int, *, was_known: bool, now: datetime) -> bool:
+        """Whether an armed BLE scan takes this fingerprint unlock as its own.
+
+        The Zigbee slot of a BLE-enrolled finger is unknown in advance (BLE
+        150 reported as Zigbee 11 on 2026-10-20), so the first fingerprint
+        unlock after an ``ok`` scan is taken — unless it comes from a slot
+        the registry already knew, which means some other finger was used.
+        The regular keypad enrollment keeps its exact-slot rule untouched.
+        """
+
+        scan = self.scan
+        if scan is None:
+            return False
+        scan.refresh(now=now)
+        if not scan.armed_for_verification:
+            return False
+        if was_known:
+            return False
+        return FINGERPRINT_SLOT_MIN <= user_slot <= FINGERPRINT_SLOT_MAX
+
+    def _verify_scan(
+        self, *, source: str, user_slot: int, now: datetime
+    ) -> FingerprintVerification | None:
+        """Run the unchanged enrollment verification for the slot Zigbee named."""
+
+        scan = self.scan
+        assert scan is not None
+        session = FingerprintEnrollment.start(
+            person_id=scan.person_id,
+            person_name=scan.person_name,
+            slot=user_slot,
+            now=now,
+        )
+        session.confirm_local_programming(now=now)
+        if not session.observe_unlock(source=source, user_slot=user_slot, now=now):
+            return None
+        self.slots.verify(
+            slot=user_slot,
+            person_id=scan.person_id,
+            person_name=scan.person_name,
+            now=now,
+            ble_slot=scan.ble_slot,
+        )
+        scan.observe_verified(
+            now=now, zigbee_slot=user_slot, enrollment_session_id=session.session_id
+        )
+        self.enrollment = session
+        return FingerprintVerification(
+            session=session,
+            source=source.lower(),
+            user_slot=user_slot,
+            ble_slot=scan.ble_slot,
+        )
+
     def diagnostics(self, *, now: datetime) -> dict[str, object]:
         """Return a minimal diagnostic snapshot without raw MQTT state."""
 
@@ -145,6 +240,10 @@ class NimlyLockRuntime:
         if self.enrollment is not None:
             self.enrollment.refresh(now=now)
             enrollment = self.enrollment.as_public_dict()
+        scan: dict[str, object] | None = None
+        if self.scan is not None:
+            self.scan.refresh(now=now)
+            scan = self.scan.as_public_dict()
         return {
             "state_topic": self.topic,
             "lock_state": self.lock_state,
@@ -152,6 +251,7 @@ class NimlyLockRuntime:
                 self.last_mqtt_at.isoformat() if self.last_mqtt_at is not None else None
             ),
             "fingerprint_enrollment": enrollment,
+            "fingerprint_scan": scan,
             "fingerprint_slot_counts": self.slots.diagnostics(),
         }
 
@@ -164,6 +264,10 @@ class NimlyLockRuntime:
             self.enrollment.refresh(now=now)
             enrollment = self.enrollment.as_public_dict()
             instructions = list(self.enrollment.instructions)
+        scan: dict[str, object] | None = None
+        if self.scan is not None:
+            self.scan.refresh(now=now)
+            scan = self.scan.as_public_dict()
         return {
             "state_topic": self.topic,
             "lock_state": self.lock_state,
@@ -172,14 +276,36 @@ class NimlyLockRuntime:
             ),
             "enrollment": enrollment,
             "instructions": instructions,
+            "scan": scan,
+            "used_ble_slots": self.slots.used_ble_slots(),
             "slots": self.slots.as_list(),
         }
+
+    def _refuse_if_busy(self, *, now: datetime) -> None:
+        if self.enrollment is not None:
+            state = self.enrollment.refresh(now=now)
+            if state not in TERMINAL_STATES:
+                raise FingerprintEnrollmentError(
+                    "låsen har allerede en aktiv fingerprint-enrollment"
+                )
+        if self.scan is not None:
+            self.scan.refresh(now=now)
+            if self.scan.is_active:
+                raise FingerprintEnrollmentError(
+                    "låsen har allerede en aktiv BLE-skanning"
+                )
 
     def _session(self, session_id: str) -> FingerprintEnrollment:
         session_id = session_id.strip()
         if self.enrollment is None or self.enrollment.session_id != session_id:
             raise FingerprintEnrollmentError("ukjent eller utløpt enrollment-session")
         return self.enrollment
+
+    def _scan(self, session_id: str) -> BleFingerprintScan:
+        session_id = session_id.strip()
+        if self.scan is None or self.scan.session_id != session_id:
+            raise FingerprintEnrollmentError("ukjent eller utløpt skanne-session")
+        return self.scan
 
 
 def _lock_state(payload: dict[str, Any]) -> str | None:

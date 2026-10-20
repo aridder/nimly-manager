@@ -18,5 +18,22 @@
     "abort": {
       "already_configured": "This MQTT device is already configured"
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Bluetooth and owner key",
+        "description": "Pick the lock's BLE address as Home Assistant (or its proxy) sees it. Owner key: {owner_key_state}. To import, paste the full content of owner-<address>.json from ~/.config/nimly-manager/ on the machine that enrolled the lock. The key is kept only in Home Assistant's private storage, never shown again and never included in diagnostics.",
+        "data": {
+          "ble_address": "BLE address (MAC)",
+          "owner_record": "Owner record (content of owner-*.json)",
+          "remove_owner_key": "Delete the stored owner key (a lost key needs a module reset and a new Zigbee pairing)"
+        }
+      }
+    },
+    "error": {
+      "invalid_ble_address": "Enter a BLE address like AA:BB:CC:DD:EE:FF",
+      "invalid_owner_record": "The owner record is not a complete, enrolled owner-*.json"
+    }
   }
 }
