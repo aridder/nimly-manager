@@ -61,6 +61,11 @@ async def _find_lock(scan_timeout: float):
 
 
 async def _run(args: argparse.Namespace) -> int:
+    # Refuse cheap things before a 20 s scan: the flag, then the record state.
+    if args.command in ("enroll", "fingerprint-scan") and not args.at_the_lock:
+        raise enrollment.EnrollmentRefused("legg til --at-the-lock for å bekrefte")
+    if args.command == "enroll" and len(args.name.encode("ascii", "ignore")) > 8:
+        raise enrollment.EnrollmentRefused("--name er maks 8 ASCII-tegn")
     discovered = await _find_lock(args.scan_timeout)
     adv = discovered.advertisement
     address = adv.address
@@ -84,8 +89,6 @@ async def _run(args: argparse.Namespace) -> int:
             return 0
 
         if args.command == "enroll":
-            if not args.at_the_lock:
-                raise enrollment.EnrollmentRefused("legg til --at-the-lock for å bekrefte")
             if adv.enrollment_state != "factory":
                 raise enrollment.EnrollmentRefused(
                     f"seed er ikke 00 00 (state={adv.enrollment_state}); ikke en factory-lås"
@@ -103,8 +106,6 @@ async def _run(args: argparse.Namespace) -> int:
             return 0
 
         if args.command == "fingerprint-scan":
-            if not args.at_the_lock:
-                raise enrollment.EnrollmentRefused("legg til --at-the-lock for å bekrefte")
             result = await enrollment.fingerprint_scan(
                 session, store, lock_address=address, slot=args.slot
             )
