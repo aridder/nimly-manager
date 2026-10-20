@@ -369,3 +369,11 @@ faktisk sjekker device-id (vi sender den vi satte, som appen).
 
 Neste: steg 3 (kontinuerlig annonsering uten batteriuttak), så steg 4
 (slot-kartlegging ved første `fingerprint-scan`).
+
+### Steg 3 bekreftet (2026-10-20)
+
+Uten batteriuttak, minutter etter enrollment: `nimly-ble-probe scan` ser
+låsen på −73 dBm med seed ≠ `00 00` (`enrollment=enrolled`). En enrollet
+modul **annonserer kontinuerlig**; batteriuttak trengs ikke lenger for noen
+BLE-operasjon. Batterikostnad: forventet ubetydelig (produsentens normale
+modus for app-oppsatte låser), måles via Z2M `battery` over tid.
