@@ -171,29 +171,50 @@ responseflyt før proben implementerer ECDH-linktesten.
 
 ## Fysisk observasjon 2026-10-20: ny Connect Module
 
-En nyere Connect Module er montert. To tekniske hindringer fra august er borte:
+En nyere Connect Module er montert, og BLE-tilstanden er nå lest fra HAs egen
+Bluetooth-diagnostikk.
 
-- **Kontinuerlig annonsering.** HAs Bluetooth-adapter ser nå en enhet «Nimly»
-  som sender ut tjenesten `0xFD00` i vanlig drift, ikke bare under appens
-  discovery-flyt. Det stemmer med onesti-lock sin lesning av at en *enrolled*
-  modul annonserer hele tiden. (Augustmodulen annonserte som «Dør», et
-  `DeviceNameSet`-navn; den nye som «Nimly». Onesti oppgir fabrikknavnet
-  `GlennI`, så «Nimly» er uforklart og bare et svakt hint om at modulen er
-  unavngitt — seeden avgjør, ikke navnet.)
 - **Firmware 4.8.03.** Over den dokumenterte 4.7.90-grensen for `DeviceModelGet`
   og admin-kommandoene, inkludert `FingerprintScan` (`0x57`). `firmware.py`
   rapporterer nå `fingerprint_scan_command_documented: true` for denne
   versjonen, men holder `fingerprint_enrollment: "unverified"` — at kommandoen
   er dokumentert er ikke det samme som at enrollment er bevist mot maskinvare.
+- **Vindu-bare annonsering, ikke kontinuerlig.** I steady state så *ingen* av
+  HAs to adaptere (ASUS USB-BT500 og den Pi-interne) `0xFD00` — 95–101 enheter
+  i historikken, ingen Nimly. Først etter et batteriuttak dukket låsen opp på
+  **begge** adapterne innen sekunder, på ~−98 dBm. Det motbeviser antakelsen om
+  at modulen annonserer hele tiden, og mønsteret (bare i ~4-minutters
+  pairing-vinduet etter power-cycle) er nettopp onesti-lock sitt tegn på en
+  **u-enrollet** modul. (Modulen annonserer som «Nimly»; augustmodulen som
+  «Dør», et `DeviceNameSet`-navn. Fabrikknavnet er `GlennI`, så navnet avgjør
+  ingenting — seeden gjør det.)
+- **Seed `00 00` → factory.** Service-dataen var 10 byte med strukturen
+  `00 00` | `<6-byte id>` | `00 00`: seed, identifikator, og to etterfølgende
+  null-byte. Identifikatoren viste seg å være låsens egen BLE-adresse reversert
+  (verifisert mot annonse-adressen), akkurat slik onesti beskriver en u-enrollet
+  lås. Vendor-appens egen parser leser seed som de to første bytene, og bare
+  `[seed][id][trailer]`-layouten lar appen kjenne igjen sine egne enrollede
+  låser — så seeden står trygt på offset 0. `advertisement.py` klassifiserer nå
+  dette som `factory` og rapporterer `identifier_matches_address`.
+  (De rå id-bytene er låsens BLE-adresse og holdes utenfor repoet.)
+
+**Konsekvens:** vi er på `factory`-veien. Lokal eier-enrollment er mulig **uten**
+factory reset, og Zigbee-paringen forblir urørt. Men så lenge modulen er
+u-enrollet annonserer den bare i pairing-vinduet, så **hver BLE-operasjon må
+innledes med et batteriuttak** til enrollment er gjort. Etter enrollment
+annonserer modulen formodentlig kontinuerlig (onesti sitt «presumably» — ikke
+bevist).
 
 To ting gjenstår før HA kan sende kommandoer:
 
-1. **Signalstyrke.** HA mottar på ~−100 dBm, helt i grensen. Å sende kommandoer
-   trygt krever en Bluetooth-proxy nær døra (ESP32 med ESPHome,
+1. **Signalstyrke.** ~−98 dBm på begge adaptere, fortsatt helt i grensen. Å
+   sende kommandoer trygt krever en Bluetooth-proxy nær døra (ESP32 med ESPHome,
    `bluetooth_proxy` med `active: true`).
 2. **Eierinnlogging.** Ingen har kjørt onesti-lock sin eier-auth mot en fysisk
    lås ennå. Vår første test vil være den aller første maskinvaretesten av den
-   flyten. Ingen proprietær write sendes før seed-lesningen under er avklart.
+   flyten. Ingen proprietær write sendes i denne omgang; klassifiseringen er
+   avklart, men selve hardware-testen er en egen, bevisst økt med proxyen på
+   plass.
 
 ### Beslutningstre: trenger vi factory reset?
 
