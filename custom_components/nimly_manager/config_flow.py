@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import re
 from typing import Any
 
 import voluptuous as vol
 from homeassistant import config_entries
-from homeassistant.components import bluetooth
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers.selector import (
@@ -21,6 +19,13 @@ from homeassistant.helpers.selector import (
     TextSelectorType,
 )
 
+from .ble_setup import (
+    BleSetupError,
+    async_apply_ble_setup,
+    discovered_nimly_locks,
+    normalize_mac,
+    parse_owner_record,
+)
 from .const import (
     CONF_BASE_TOPIC,
     CONF_BLE_ADDRESS,
@@ -29,15 +34,10 @@ from .const import (
     DATA_OWNER_STORE,
     DEFAULT_BASE_TOPIC,
     DOMAIN,
-    OPTION_OWNER_KEY_IMPORTED,
-    OPTION_OWNER_NAME,
     state_topic,
 )
-from .nimly_ble.constants import NIMLY_ADVERTISING_UUID
-from .nimly_ble.keystore import KeyStoreError, owner_record_from_json
 
 CONF_REMOVE_OWNER_KEY = "remove_owner_key"
-MAC_RE = re.compile(r"^[0-9A-F]{2}(:[0-9A-F]{2}){5}$")
 
 
 class NimlyManagerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -115,29 +115,32 @@ class NimlyManagerOptionsFlow(config_entries.OptionsFlow):
         options = dict(entry.options)
 
         if user_input is not None:
-            address = _normalize_mac(user_input.get(CONF_BLE_ADDRESS, ""))
-            if address is None:
+            try:
+                record = parse_owner_record(user_input.get(CONF_OWNER_RECORD))
+            except BleSetupError:
+                errors[CONF_OWNER_RECORD] = "invalid_owner_record"
+                record = None
+            if normalize_mac(user_input.get(CONF_BLE_ADDRESS, "")) is None:
                 errors[CONF_BLE_ADDRESS] = "invalid_ble_address"
-            record = None
-            pasted = (user_input.get(CONF_OWNER_RECORD) or "").strip()
-            if pasted:
-                try:
-                    record = owner_record_from_json(pasted)
-                except KeyStoreError:
-                    errors[CONF_OWNER_RECORD] = "invalid_owner_record"
             if not errors:
-                if user_input.get(CONF_REMOVE_OWNER_KEY):
-                    await store.async_remove(entry.entry_id)
-                    options.pop(OPTION_OWNER_NAME, None)
-                elif record is not None:
-                    await store.async_save_record(entry.entry_id, record)
-                    options[OPTION_OWNER_NAME] = record.name or None
-                options[CONF_BLE_ADDRESS] = address
-                options[OPTION_OWNER_KEY_IMPORTED] = store.has(entry.entry_id)
+                options = await async_apply_ble_setup(
+                    self.hass,
+                    entry,
+                    address=user_input[CONF_BLE_ADDRESS],
+                    record=record,
+                    remove_owner_key=bool(user_input.get(CONF_REMOVE_OWNER_KEY)),
+                )
                 return self.async_create_entry(title="", data=options)
 
         current = options.get(CONF_BLE_ADDRESS) or ""
-        candidates = _discovered_nimly_addresses(self.hass)
+        candidates: list[SelectOptionDict] = [
+            {
+                "value": str(lock["address"]),
+                "label": f"{lock['name']} {lock['address']} · {lock['rssi']} dBm "
+                f"via {lock['source']} · {lock['enrollment_state']}",
+            }
+            for lock in discovered_nimly_locks(self.hass)
+        ]
         if current and current not in {c["value"] for c in candidates}:
             candidates.insert(0, {"value": current, "label": f"{current} (lagret)"})
         schema: dict[Any, Any] = {
@@ -166,29 +169,3 @@ class NimlyManagerOptionsFlow(config_entries.OptionsFlow):
                 ),
             },
         )
-
-
-def _normalize_mac(value: str) -> str | None:
-    cleaned = value.strip().upper().replace("-", ":")
-    if len(cleaned) == 12 and ":" not in cleaned:
-        cleaned = ":".join(cleaned[i : i + 2] for i in range(0, 12, 2))
-    return cleaned if MAC_RE.match(cleaned) else None
-
-
-def _discovered_nimly_addresses(hass) -> list[SelectOptionDict]:
-    """Connectable advertisements carrying Nimly's 0xFD00 service data."""
-
-    candidates: list[SelectOptionDict] = []
-    for info in bluetooth.async_discovered_service_info(hass, connectable=True):
-        if NIMLY_ADVERTISING_UUID not in info.service_data:
-            continue
-        seed = bytes(info.service_data[NIMLY_ADVERTISING_UUID])[:2]
-        enrolled = "enrollet" if seed and seed != b"\x00\x00" else "factory"
-        candidates.append(
-            {
-                "value": info.address,
-                "label": f"{info.name or 'Nimly'} {info.address} · {info.rssi} dBm "
-                f"via {info.source} · {enrolled}",
-            }
-        )
-    return candidates

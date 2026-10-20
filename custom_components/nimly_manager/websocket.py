@@ -10,6 +10,12 @@ from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import config_validation as cv
 
+from .ble_setup import (
+    BleSetupError,
+    async_apply_ble_setup,
+    discovered_nimly_locks,
+    parse_owner_record,
+)
 from .ble_transport import ble_status
 from .const import (
     ATTR_AT_THE_LOCK,
@@ -42,6 +48,8 @@ WS_CONFIRM = f"{DOMAIN}/enrollment/confirm"
 WS_CANCEL = f"{DOMAIN}/enrollment/cancel"
 WS_SCAN_START = f"{DOMAIN}/fingerprint_scan/start"
 WS_SCAN_CANCEL = f"{DOMAIN}/fingerprint_scan/cancel"
+WS_BLE_CANDIDATES = f"{DOMAIN}/ble/candidates"
+WS_BLE_SETUP = f"{DOMAIN}/ble/setup"
 
 
 @websocket_api.websocket_command(
@@ -254,6 +262,59 @@ def websocket_scan_cancel(
     connection.send_result(msg["id"], scan_response(scan))
 
 
+@websocket_api.websocket_command({"type": WS_BLE_CANDIDATES})
+@websocket_api.require_admin
+@callback
+def websocket_ble_candidates(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict,
+) -> None:
+    """Nimly advertisements HA can connect to, for the address picker."""
+
+    connection.send_result(msg["id"], {"locks": discovered_nimly_locks(hass)})
+
+
+@websocket_api.websocket_command(
+    {
+        "type": WS_BLE_SETUP,
+        vol.Required(ATTR_CONFIG_ENTRY_ID): cv.string,
+        vol.Required(CONF_BLE_ADDRESS): cv.string,
+        vol.Optional("owner_record"): cv.string,
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+async def websocket_ble_setup(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict,
+) -> None:
+    """Import the owner key and BLE address from the panel. Never echoes the key."""
+
+    entry = hass.config_entries.async_get_entry(msg[ATTR_CONFIG_ENTRY_ID])
+    if entry is None or entry.domain != DOMAIN:
+        connection.send_error(msg["id"], "entry_not_loaded", "Låsen er ikke lastet")
+        return
+    try:
+        record = parse_owner_record(msg.get("owner_record"))
+        options = await async_apply_ble_setup(
+            hass, entry, address=msg[CONF_BLE_ADDRESS], record=record
+        )
+    except BleSetupError as err:
+        connection.send_error(msg["id"], "invalid_ble_setup", str(err))
+        return
+    hass.config_entries.async_update_entry(entry, options=options)
+    store: NimlyOwnerKeyStore = hass.data[DOMAIN][DATA_OWNER_STORE]
+    connection.send_result(
+        msg["id"],
+        {
+            "address": options[CONF_BLE_ADDRESS],
+            "owner_key_imported": store.has(entry.entry_id),
+        },
+    )
+
+
 @callback
 def async_register_websocket_api(hass: HomeAssistant) -> None:
     """Register panel commands once."""
@@ -265,6 +326,8 @@ def async_register_websocket_api(hass: HomeAssistant) -> None:
         websocket_cancel,
         websocket_scan_start,
         websocket_scan_cancel,
+        websocket_ble_candidates,
+        websocket_ble_setup,
     ):
         websocket_api.async_register_command(hass, command)
 
