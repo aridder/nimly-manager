@@ -377,3 +377,25 @@ låsen på −73 dBm med seed ≠ `00 00` (`enrollment=enrolled`). En enrollet
 modul **annonserer kontinuerlig**; batteriuttak trengs ikke lenger for noen
 BLE-operasjon. Batterikostnad: forventet ubetydelig (produsentens normale
 modus for app-oppsatte låser), måles via Z2M `battery` over tid.
+
+### Steg 4: første FingerprintScan og slot-kartlegging (2026-10-20)
+
+- `fingerprint-scan --slot 150`, første forsøk: `lockStatus = error` etter at
+  brukeren ventet på utskrift. Andre forsøk, med fingeren på sensoren rett
+  etter sending: `ok` etter **8,5 s**. Låsen svarer altså **etter** at
+  skanningen er ferdig, ikke når den starter — fingeren må på umiddelbart.
+  Ingen `UserAdded`-event kom over BLE i noen av forsøkene (uavklart; stopper
+  ingenting).
+- Fysisk opplåsing med den nye fingeren: Z2M rapporterte
+  `last_unlock_source = fingerprintsensor`, `last_unlock_user = 11`.
+
+**Ett datapunkt: BLE-slot 150 → Zigbee-slot 11.** Ikke bevist som fast
+offset; kan være «neste ledige Zigbee-slot». Ingen automatisk mapping før et
+andre datapunkt (BLE 151) er observert. Dermed er hele hybriden bevist
+ende-til-ende: HA starter over BLE, fingeren registreres, Zigbee verifiserer.
+
+Gjenstår (steg 5, egen økt): HA-action i nimly-manager som sender
+`FingerprintScan` via HAs `bluetooth`-integrasjon (krever ESPHome-proxy ved
+døra; Mac-en ved døra fikk −73 dBm, HA-verten −98), eiernøkkel flyttet fra
+`~/.config/nimly-manager/` til HA `Store`, og UI som sier «legg fingeren på
+NÅ» i stedet for å vente på svar. Verifisering via dagens Zigbee-flyt, uendret.
