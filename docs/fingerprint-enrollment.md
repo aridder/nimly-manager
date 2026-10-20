@@ -176,7 +176,10 @@ En nyere Connect Module er montert. To tekniske hindringer fra august er borte:
 - **Kontinuerlig annonsering.** HAs Bluetooth-adapter ser nå en enhet «Nimly»
   som sender ut tjenesten `0xFD00` i vanlig drift, ikke bare under appens
   discovery-flyt. Det stemmer med onesti-lock sin lesning av at en *enrolled*
-  modul annonserer hele tiden.
+  modul annonserer hele tiden. (Augustmodulen annonserte som «Dør», et
+  `DeviceNameSet`-navn; den nye som «Nimly». Onesti oppgir fabrikknavnet
+  `GlennI`, så «Nimly» er uforklart og bare et svakt hint om at modulen er
+  unavngitt — seeden avgjør, ikke navnet.)
 - **Firmware 4.8.03.** Over den dokumenterte 4.7.90-grensen for `DeviceModelGet`
   og admin-kommandoene, inkludert `FingerprintScan` (`0x57`). `firmware.py`
   rapporterer nå `fingerprint_scan_command_documented: true` for denne
@@ -202,14 +205,22 @@ den (`[seed: 2B][identifier: 6B]`). `advertisement.py` rapporterer nå
 
 | `enrollment_state` | Betydning | Vei videre |
 |---|---|---|
-| `factory` (seed `00 00`) | Aldri enrolled over BLE; standard eiernøkkel åpner ennå | Lokal eier-enrollment virker **uten** reset. Zigbee urørt. Laveste risiko. |
-| `enrolled` (seed ≠ `00 00`) **og** låsen finnes i brukerens egen Nimly BLE-app | Enrolled gjennom app + sky | HA kan autentisere som med-eier **uten** reset: eiernøkkel og device-id hentes fra brukerens egen sky-konto ved reconnect (`LockCredentialDto` / `Credentials`-endepunktet i onesti-notatene). Brukeren gjør engangs-innlogging selv; ingenting logges. |
+| `factory` (seed `00 00`) | Aldri enrolled over BLE; standard eiernøkkel forventes å åpne | Lokal eier-enrollment uten reset. Zigbee urørt. Laveste risiko. At standardnøkkelen godtas på gjeldende firmware er dokumentert, men utestet mot lås. |
+| `enrolled` (seed ≠ `00 00`) **og** låsen finnes i brukerens egen Nimly BLE-app | Enrolled gjennom app + sky | HA kan autentisere som med-eier **uten** reset: eiernøkkel og device-id hentes fra brukerens egen sky-konto ved reconnect (`LockCredentialDto` / `Credentials`-endepunktet i onesti-notatene). Engangs-bootstrap utenfor ordinær flyt, se under. |
 | `enrolled` men **ikke** i noen app | Enrolled, men nøkkelen er utilgjengelig | Modul-reset (knapp, ~15 s — dropper Zigbee-paringen) → ny Zigbee-paring → deretter som `factory`. |
 | `ambiguous` / `unknown` | 10-byte-layout ikke avklart, eller ingen service-data lest | Ikke beslutt. Skaff en rå advertisement-capture (se under) og avklar byteordenen før noe sendes. |
 
 Faren ved reset: modul-reset dropper Zigbee-paringen, og hele dagens
 nimly-manager-integrasjon går over Zigbee2MQTT. `factory`- og med-eier-veiene
 unngår dette helt.
+
+Forholdet til produktbeslutningen over: den sier at Nimly Manager *i den
+ordinære flyten* ikke skal kreve Nimly-konto-/appnøkler. Med-eier-veien bryter
+ikke dette — den er en **engangs-bootstrap utenfor ordinær flyt**. Brukeren
+logger inn mot et udokumentert reverse-engineert API (`POST /User/Login`,
+password grant) én gang, HA lagrer eiernøkkelen lokalt, og skyen røres aldri
+igjen i daglig drift. Hvis brukeren heller velger `factory`-veien, trengs ingen
+sky i det hele tatt.
 
 ### Arkitekturnotat: proben er ikke produksjonstransporten
 
