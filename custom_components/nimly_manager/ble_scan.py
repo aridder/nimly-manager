@@ -20,6 +20,7 @@ from homeassistant.core import HomeAssistant, callback
 
 from .ble_transport import HomeAssistantTransport, LockNotVisibleError
 from .const import EVENT_FINGERPRINT_SCAN_STATE
+from .fingerprint_enrollment import FingerprintEnrollmentError
 from .fingerprint_scan import BleFingerprintScan
 from .nimly_ble import enrollment
 from .nimly_ble.constants import parse_firmware
@@ -83,7 +84,10 @@ class FingerprintScanCoordinator:
             return datetime.now(UTC)
 
         def finger_prompt() -> None:
-            scan.mark_scanning(now=now())
+            # A cancel racing the write only changes what we report, not the
+            # write itself: the command is already on its way to the lock.
+            if scan.is_active:
+                scan.mark_scanning(now=now())
             self.async_fire_state(entry_id, scan)
 
         try:
@@ -119,6 +123,9 @@ class FingerprintScanCoordinator:
             # Local cancel already moved the scan to CANCELLED; shutdown too.
             scan.fail(now=now(), error="avbrutt")
             raise
+        except FingerprintEnrollmentError as error:
+            # The scan left SCANNING underneath us (cancelled or expired).
+            scan.fail(now=now(), error=str(error))
         except TimeoutError:
             scan.fail(now=now(), error="tidsavbrudd mot låsen")
         except LockNotVisibleError as error:
