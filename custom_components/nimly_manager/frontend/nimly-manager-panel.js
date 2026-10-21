@@ -24,6 +24,10 @@ class NimlyManagerPanel extends HTMLElement {
     this._bleSlot = null;
     this._bleName = "";
     this._atTheLock = false;
+    this._bleCandidates = null;
+    this._bleAddress = "";
+    this._ownerRecordDraft = "";
+    this._showManual = false;
   }
 
   set hass(value) {
@@ -169,6 +173,43 @@ class NimlyManagerPanel extends HTMLElement {
     });
   }
 
+  async _loadCandidates() {
+    if (!this._hass || this._bleCandidates !== null) return;
+    this._bleCandidates = [];
+    try {
+      const result = await this._hass.callWS({ type: "nimly_manager/ble/candidates" });
+      this._bleCandidates = result.locks || [];
+      if (!this._bleAddress && this._bleCandidates.length === 1) {
+        this._bleAddress = this._bleCandidates[0].address;
+      }
+    } catch (error) {
+      this._error = this._errorText(error);
+    }
+    this._render();
+  }
+
+  async _saveBleSetup() {
+    const address = this._bleAddress.trim();
+    const ownerRecord = this._ownerRecordDraft.trim();
+    if (!address) {
+      this._error = "Velg låsens Bluetooth-adresse.";
+      this._render();
+      return;
+    }
+    if (!ownerRecord) {
+      this._error = "Lim inn innholdet i owner-*.json.";
+      this._render();
+      return;
+    }
+    await this._action("nimly_manager/ble/setup", {
+      ble_address: address,
+      owner_record: ownerRecord,
+    });
+    if (!this._error) this._ownerRecordDraft = "";
+    // The entry reloads after the options change; fetch fresh state shortly.
+    window.setTimeout(() => this._load(true), 2500);
+  }
+
   _cancelScan(sessionId) {
     this._action("nimly_manager/fingerprint_scan/cancel", {
       session_id: sessionId,
@@ -219,12 +260,14 @@ class NimlyManagerPanel extends HTMLElement {
 
     const scan = entry.scan;
     const scanActive = scan && ACTIVE_SCAN_STATES.has(scan.state);
+    const bleReady = Boolean(entry.ble?.owner_key_imported && entry.ble?.address);
 
     return `
       ${this._deviceCard(entry)}
       ${scan && (scanActive || scan.state === "verified" || scan.state === "failed") ? this._scanCard(entry) : ""}
       ${active || (enrollment?.state === "verified" && !scan?.enrollment_session_id) ? this._workflow(entry) : ""}
-      ${entry.ble?.owner_key_imported && !scanActive && !active ? this._scanForm(entry) : ""}
+      ${bleReady && !scanActive && !active ? this._scanForm(entry) : ""}
+      ${!bleReady && !scanActive && !active ? this._bleSetupCard(entry) : ""}
       <section class="card slots-card">
         <div class="section-heading">
           <div>
@@ -245,7 +288,11 @@ class NimlyManagerPanel extends HTMLElement {
             return this._slotButton(slot, known.get(slot), enrollment);
           }).join("")}
         </div>
-        ${!active && !scanActive ? this._startForm(known) : `<p class="active-note">Fullfør eller avbryt aktiv registrering før du velger en ny slot.</p>`}
+        ${active || scanActive
+          ? `<p class="active-note">Fullfør eller avbryt aktiv registrering før du velger en ny slot.</p>`
+          : bleReady && !this._showManual
+            ? `<button class="secondary wide" id="show-manual">Manuelt med masterfinger (###) …</button>`
+            : this._startForm(known)}
       </section>
     `;
   }
@@ -380,6 +427,34 @@ class NimlyManagerPanel extends HTMLElement {
       </section>`;
   }
 
+  _bleSetupCard(entry) {
+    if (this._bleCandidates === null) window.setTimeout(() => this._loadCandidates(), 0);
+    const candidates = this._bleCandidates || [];
+    const current = this._bleAddress || entry.ble?.address || "";
+    const options = candidates
+      .map((lock) => {
+        const label = `${lock.name} ${lock.address} · ${lock.rssi} dBm via ${lock.source}${lock.enrollment_state === "factory" ? " · factory" : ""}`;
+        return `<option value="${this._escape(lock.address)}" ${lock.address === current ? "selected" : ""}>${this._escape(label)}</option>`;
+      })
+      .join("");
+    return `
+      <section class="card">
+        <div class="section-heading">
+          <div><p class="eyebrow">BLUETOOTH · ANBEFALT</p><h2>Registrer fingre uten masterfinger</h2></div>
+        </div>
+        <p class="explanation">Med låsens eiernøkkel kan Home Assistant starte fingeravtrykkskanningen over Bluetooth. Da slipper du ### og masterfinger. Dette gjøres én gang.</p>
+        <label for="ble-address">Låsens Bluetooth-adresse</label>
+        ${candidates.length
+          ? `<select id="ble-address" aria-label="Bluetooth-adresse"><option value="">Velg lås</option>${options}</select>`
+          : `<input id="ble-address" placeholder="AA:BB:CC:DD:EE:FF" value="${this._escape(current)}">
+             <p class="explanation">${this._bleCandidates === null ? "Leter etter låsen …" : "Home Assistant ser ingen Nimly-lås over Bluetooth nå. Skriv adressen manuelt, eller sjekk Bluetooth-proxyen ved døra."}</p>`}
+        <label for="owner-record">Eiernøkkel: innholdet i owner-*.json</label>
+        <input id="owner-record" type="password" autocomplete="off" spellcheck="false" placeholder="Lim inn hele fila" value="${this._escape(this._ownerRecordDraft)}">
+        <p class="privacy">Fila ligger i ~/.config/nimly-manager/ på maskinen som tok eierskap til låsen. Nøkkelen lagres bare i Home Assistants private lager, vises aldri igjen og er ikke med i diagnostikk. Den blir med i HA-sikkerhetskopier.</p>
+        <button class="primary wide" id="save-ble" ${this._working ? "disabled" : ""}>${this._working ? "Lagrer …" : "Lagre og aktiver Bluetooth"}</button>
+      </section>`;
+  }
+
   _instructions(instructions) {
     return `
       <div class="instruction-box">
@@ -480,6 +555,26 @@ class NimlyManagerPanel extends HTMLElement {
       const input = this.shadowRoot.getElementById("ble-name");
       if (input) this._bleName = input.value;
       this._startScan();
+    });
+    this.shadowRoot.getElementById("ble-address")?.addEventListener("input", (event) => {
+      this._bleAddress = event.target.value;
+    });
+    this.shadowRoot.getElementById("ble-address")?.addEventListener("change", (event) => {
+      this._bleAddress = event.target.value;
+    });
+    this.shadowRoot.getElementById("owner-record")?.addEventListener("input", (event) => {
+      this._ownerRecordDraft = event.target.value;
+    });
+    this.shadowRoot.getElementById("save-ble")?.addEventListener("click", () => {
+      const address = this.shadowRoot.getElementById("ble-address");
+      const record = this.shadowRoot.getElementById("owner-record");
+      if (address) this._bleAddress = address.value;
+      if (record) this._ownerRecordDraft = record.value;
+      this._saveBleSetup();
+    });
+    this.shadowRoot.getElementById("show-manual")?.addEventListener("click", () => {
+      this._showManual = true;
+      this._render();
     });
     const scanId = entry?.scan?.session_id;
     if (scanId) {

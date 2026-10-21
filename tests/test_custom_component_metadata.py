@@ -75,6 +75,8 @@ def test_admin_panel_asset_contains_enrollment_flow() -> None:
     assert '"nimly_manager/fingerprint_scan/start"' in source
     assert '"nimly_manager/fingerprint_scan/cancel"' in source
     assert "NÅ" in source  # the finger-on-now prompt
+    assert '"nimly_manager/ble/setup"' in source  # gear opens the panel, not options
+    assert '"nimly_manager/ble/candidates"' in source
 
 
 def test_panel_version_matches_release() -> None:

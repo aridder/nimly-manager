@@ -1,5 +1,13 @@
 # Endringslogg
 
+## 0.3.2
+
+- Eiernøkkel og Bluetooth-adresse settes nå opp direkte i Nimly Manager-panelet.
+  Tannhjulet på integrasjonen åpner panelet, så innstillingsskjemaet var ikke
+  mulig å nå fra brukergrensesnittet.
+- Når Bluetooth er satt opp, er skann over Bluetooth hovedveien i panelet.
+  Tastaturflyten med ### og masterfinger ligger bak «Manuelt med masterfinger».
+
 ## 0.3.1
 
 - Samme funksjonalitet som 0.3.0. Taggen `v0.3.0` ble først laget før
